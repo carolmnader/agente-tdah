@@ -1,0 +1,456 @@
+const Anthropic = require('@anthropic-ai/sdk');
+const { getHistory, addMessage, getMemorySummary, addTask, addVictory, updateProfile, loadCarolProfile, extrairEsalvarFatos, buildMemoryContext, detectarHumor, salvarHumor } = require('./memorySupabase');
+const { saveToObsidian } = require('./obsidian');
+const { loadEvolvedPrompt } = require('./selfImprove');
+const { isEmergencia, getModoEmergencia, gerarCheckin, getCheckinMatinal, interpretarCheckin, getRespostaACT } = require('../modules/holistic');
+const { getFaseLunar, getContextoAstrologico } = require('../integrations/astrology');
+const { getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
+const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holistic-context');
+const { processarCalendar } = require('./calendarBrain');
+const { buscarPessoaInteligente, formatarPessoa } = require('./crm');
+const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// Cache do check-in mais recente da Carol
+let ultimoCheckin = null;
+
+// ─────────────────────────────────────────────
+// PASSO 1 — Analisa a mensagem (pensamento rápido)
+// ─────────────────────────────────────────────
+async function analyzeMessage(message) {
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 500,
+    messages: [{
+      role: 'user',
+      content: `Analise esta mensagem de uma pessoa com TDAH e responda SOMENTE com JSON válido, sem markdown:
+
+Mensagem: "${message}"
+
+Responda exatamente neste formato:
+{
+  "intent": "dump|task|focus|emergency|report|question|chat|idea|schedule",
+  "emotion": "calm|stressed|excited|overwhelmed|frustrated|happy|tired",
+  "urgency": "low|medium|high",
+  "has_task": true/false,
+  "task_text": "texto da tarefa se houver, senão null",
+  "has_victory": true/false,
+  "victory_text": "texto da vitória se houver, senão null",
+  "energy_mentioned": true/false,
+  "energy_level": "low|medium|high|null",
+  "thinking_note": "uma frase sobre o que Carol realmente precisa agora"
+}`
+    }]
+  });
+
+  try {
+    const text = response.content[0].text.trim();
+    return JSON.parse(text);
+  } catch {
+    return {
+      intent: 'chat',
+      emotion: 'calm',
+      urgency: 'low',
+      has_task: false,
+      task_text: null,
+      has_victory: false,
+      victory_text: null,
+      energy_mentioned: false,
+      energy_level: null,
+      thinking_note: 'Responder com atenção e cuidado'
+    };
+  }
+}
+
+// ─────────────────────────────────────────────
+// PASSO 2 — Escolhe a estratégia de resposta
+// ─────────────────────────────────────────────
+function chooseStrategy(analysis) {
+  const strategies = {
+    emergency: {
+      name: 'Modo Emergência',
+      instruction: 'Carol está sobrecarregada. PRIMEIRO valide o sentimento em 1 linha. DEPOIS ofereça UMA coisa minúscula para fazer agora. Máximo 4 linhas.',
+    },
+    dump: {
+      name: 'Brain Dump',
+      instruction: 'Organize o que Carol disse em bullets simples. Liste no máximo 3 itens mais importantes. Pergunte qual ela quer atacar primeiro.',
+    },
+    task: {
+      name: 'Criação de Tarefa',
+      instruction: 'Confirme a tarefa, quebre em 2-3 micro-passos de 5 min cada. Pergunte quando ela quer fazer.',
+    },
+    focus: {
+      name: 'Modo Foco',
+      instruction: 'Confirme a tarefa, inicie Pomodoro de 15 min. Seja animada e encorajadora. Diga que vai fazer check-in depois.',
+    },
+    idea: {
+      name: 'Captura de Ideia',
+      instruction: 'Celebre a ideia com entusiasmo genuíno. Salve e confirme. Ofereça desenvolver ou deixar para depois.',
+    },
+    schedule: {
+      name: 'Agendamento',
+      instruction: 'Extraia data/hora/duração. Adicione buffer de 30min. Confirme antes de criar.',
+    },
+    report: {
+      name: 'Relatório',
+      instruction: 'Pergunte sobre 3 vitórias do dia. Celebre cada uma. Gere resumo motivador.',
+    },
+    question: {
+      name: 'Pergunta',
+      instruction: 'Responda de forma direta e clara. Máximo 3 pontos. Use exemplo prático se ajudar.',
+    },
+    chat: {
+      name: 'Conversa',
+      instruction: 'Seja calorosa e presente. Resposta curta, máximo 3 linhas. Mostre que está ouvindo.',
+    },
+  };
+
+  // Sobrescreve se emoção é forte
+  if (analysis.emotion === 'overwhelmed' || analysis.emotion === 'frustrated') {
+    return strategies.emergency;
+  }
+
+  return strategies[analysis.intent] || strategies.chat;
+}
+
+// ─────────────────────────────────────────────
+// PASSO 3 — Gera a resposta final
+// ─────────────────────────────────────────────
+async function generateResponse(message, analysis, strategy, memorySummary) {
+  const { SYSTEM_PROMPT } = require('../prompts/system');
+
+  const evolvedAdditions = loadEvolvedPrompt();
+  const carolProfile = loadCarolProfile();
+
+  // Contexto holístico: ayurveda + lua + check-in + insight
+  let holisticContext = '';
+  try {
+    const agora = new Date();
+    const lua = await getFaseLunar();
+    const ayurveda = getContextoAyurvedico(agora);
+    const astro = await getContextoAstrologico(agora);
+
+    holisticContext = buildHolisticContext({ lua, checkin: ultimoCheckin, agora });
+
+    holisticContext += `\n\n━━━ DOSHA ATUAL ━━━\n${ayurveda.bloco.nome}: ${ayurveda.bloco.descricao}`;
+    holisticContext += `\nIdeal agora: ${ayurveda.estrategia.estrategias[0]}`;
+    holisticContext += `\nEvitar: ${ayurveda.estrategia.riscos[0]}`;
+
+    // Se Carol tá travada/overwhelmed, adiciona protocolo de desbloqueio
+    if (analysis.emotion === 'overwhelmed' || analysis.emotion === 'frustrated' || analysis.intent === 'emergency') {
+      holisticContext += '\n' + buildBloqueioContext();
+    }
+
+    // Insight rápido do dia (se disponível)
+    try {
+      const insight = await gerarInsightRapido();
+      if (insight) holisticContext += `\n\nINSIGHT DO DIA: ${insight.replace(/<[^>]*>/g, '')}`;
+    } catch(e) {}
+  } catch (err) {
+    console.log('⚠️ [Brain] Erro ao gerar contexto holístico (continuando sem):', err.message);
+  }
+
+  let profileContext = '';
+  if (carolProfile) {
+    const p = carolProfile.profile || carolProfile.identidade || {};
+    const h = carolProfile.health || carolProfile.saude || {};
+    const tdah = carolProfile.tdah_profile || carolProfile.padroes_tdah || {};
+    const prof = carolProfile.professional || carolProfile.vida_profissional || {};
+
+    const nome = p.preferred_name || p.como_chamar || 'Carol';
+    const idade = p.age || p.idade || '';
+    const profissao = p.profession || p.profissao || '';
+    const diagnosticos = h.diagnoses || h.diagnosticos || [];
+    const meds = h.medications?.morning
+      ? h.medications.morning.map(m => `${m.name} ${m.dose}`).join(', ')
+      : (h.medicamentos || []).map(m => `${m.nome} ${m.dose}`).join(', ');
+    const struggles = tdah.main_struggles || tdah.queixas_proprias || [];
+    const works = tdah.what_works || tdah.o_que_melhora || [];
+    const doesntWork = tdah.what_doesnt_work || tdah.o_que_piora || [];
+    const energia = tdah.peak_energy_time || '';
+    const meta = prof.financial_goal_2026 || prof.meta_2026 || '';
+    const skills = prof.skills || [];
+
+    profileContext = `
+━━━ QUEM É A CAROL ━━━
+${nome}, ${idade} anos, ${profissao}
+Status: ${p.current_status || ''}
+Diagnósticos: ${diagnosticos.join(', ')}
+Medicação manhã: ${meds}
+Medicação noite: ${h.medications?.night ? h.medications.night.map(m => `${m.name} ${m.dose}`).join(', ') : ''}
+Energia pico: ${energia}
+Dificuldades: ${struggles.slice(0, 4).join(' | ')}
+O que funciona: ${works.join(', ')}
+O que piora: ${doesntWork.join(', ')}
+Skills: ${skills.join(', ')}
+Meta 2026: ${meta}`;
+  }
+
+  const systemWithMemory = `${SYSTEM_PROMPT}
+${profileContext}
+${holisticContext}
+
+━━━ MEMÓRIA ATIVA ━━━
+${memorySummary || 'Primeira conversa do dia.'}
+
+━━━ APRENDIZADOS DA ARIA ━━━
+${evolvedAdditions || 'Sem aprendizados adicionais ainda.'}
+
+━━━ INSTRUÇÃO DESTA RESPOSTA ━━━
+Estratégia: ${strategy.name}
+${strategy.instruction}
+
+Estado emocional detectado: ${analysis.emotion}
+Urgência: ${analysis.urgency}
+Nota interna: ${analysis.thinking_note}`;
+
+  const history = await getHistory();
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 4096,
+    system: systemWithMemory,
+    messages: [
+      ...history.slice(-10), // últimas 10 mensagens
+      { role: 'user', content: message }
+    ],
+  });
+
+  return response.content[0].text;
+}
+
+// ─────────────────────────────────────────────
+// PASSO 4 — Salva o thinking log no Obsidian
+// ─────────────────────────────────────────────
+function saveThinkingLog(message, analysis, strategy, ariaResponse) {
+  const timestamp = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  const log = `
+## 🕐 ${timestamp}
+
+**Carol disse:** ${message}
+
+**Análise interna:**
+- Intenção: \`${analysis.intent}\`
+- Emoção: \`${analysis.emotion}\`
+- Urgência: \`${analysis.urgency}\`
+- Nota: _${analysis.thinking_note}_
+
+**Estratégia escolhida:** ${strategy.name}
+
+**ARIA respondeu:**
+> ${ariaResponse.replace(/\n/g, '\n> ')}
+
+---`;
+
+  saveToObsidian('thinking', log);
+}
+
+// ─────────────────────────────────────────────
+// ORQUESTRADOR PRINCIPAL — roda tudo em sequência
+// ─────────────────────────────────────────────
+async function think(message) {
+  try {
+    const lower = message.toLowerCase().trim();
+
+    // Passo 0-PRE: Se conversa anterior foi Calendar e Carol pergunta se funcionou
+    const history = await getHistory();
+    const ultimaMsgAssistant = history.length >= 1 ? (history[history.length - 1]?.content || '') : '';
+    const eraCalendar = /calendar|agenda|agend|event|compromiss|📅|✅.*gendado/i.test(ultimaMsgAssistant);
+    if (eraCalendar && /funcionou|apareceu|criou|consegue|atualizou|teste|verificar|deu certo/i.test(lower)) {
+      const resp = '📅 Verifique seu Google Calendar agora — abra o app e veja se o evento apareceu. Se não apareceu, me diz exatamente o que você pediu para agendar que eu tento novamente.';
+      await addMessage('user', message);
+      await addMessage('assistant', resp);
+      return resp;
+    }
+
+    // Passo 0a: check-in / bom dia → responde direto sem gastar API de análise
+    if (lower === 'checkin' || lower === 'check-in' || lower === 'check in' || lower === 'bom dia' || lower === 'bom dia!') {
+      const checkinMsg = gerarCheckin();
+      await addMessage('user', message);
+      await addMessage('assistant', checkinMsg);
+      return checkinMsg;
+    }
+
+    // Passo 0b: tenta parsear resposta de check-in (ex: "3 2 4 1")
+    const checkinMatch = lower.match(/^(\d)\s+(\d)\s+(\d)\s+(\d)$/);
+    if (checkinMatch) {
+      const [, corpo, mente, emocao, energia] = checkinMatch.map(Number);
+      if ([corpo, mente, emocao, energia].every(n => n >= 1 && n <= 5)) {
+        ultimoCheckin = interpretarCheckin(corpo, mente, emocao, energia);
+        await addMessage('user', message);
+        // Continua para gerar resposta contextualizada com o check-in
+      }
+    }
+
+    // Passo 0b2: Relatório / análise de padrões
+    if (/relat[oó]rio|padr[oõ]es|an[aá]lise|como estou|como fui|meu progresso|minha evolu[çc][aã]o/i.test(lower)) {
+      try {
+        const relatorio = /m[eê]s|mensal|30 dias/i.test(lower)
+          ? await gerarRelatorioMensal()
+          : await gerarRelatorioSemanal();
+        await addMessage('user', message);
+        await addMessage('assistant', relatorio);
+        return relatorio;
+      } catch(e) {
+        console.log('📊 [Analytics] Erro relatório:', e.message);
+      }
+    }
+
+    // Passo 0b3: emergência → protocolo 3 passos direto (ANTES do Calendar para não gastar tokens)
+    if (isEmergencia(message)) {
+      const emergenciaMsg = getModoEmergencia();
+      await addMessage('user', message);
+      await addMessage('assistant', emergenciaMsg);
+      saveToObsidian('thinking', `⚠️ EMERGÊNCIA detectada: "${message}" → Protocolo 3 passos ativado`);
+      return emergenciaMsg;
+    }
+
+    // Passo 0c-pre: CRM — consulta sobre pessoas
+    if (/quem [eé]|informa[çc][oõ]es sobre|contato d[oa]|n[uú]mero d[oa]|como chama|lembra d[oa]|me fala d[oa]/i.test(lower)) {
+      const termoMatch = message.match(/(?:quem [eé]|sobre|contato d[oa]|n[uú]mero d[oa]|lembra d[oa]|me fala d[oa])\s+([a-záéíóúâêîôûãõç\s]+)/i);
+      if (termoMatch) {
+        const termo = termoMatch[1].trim();
+        try {
+          const pessoas = await buscarPessoaInteligente(termo);
+          if (pessoas.length > 0) {
+            const resp = pessoas.map(formatarPessoa).join('\n\n');
+            await addMessage('user', message);
+            await addMessage('assistant', resp);
+            return resp;
+          }
+        } catch(e) {
+          console.log('👥 [CRM] Erro na busca:', e.message);
+        }
+      }
+    }
+
+    // Passo 0c: Calendar inteligente (NLP via Claude)
+    console.log(`=== BRAIN RECEBEU: "${message.substring(0, 50)}"`);
+    let respostaCalendar = null;
+    try {
+      respostaCalendar = await processarCalendar(message, await getHistory());
+    } catch(e) {
+      console.log('📅 [Calendar] Pulando calendar:', e.message);
+    }
+    if (respostaCalendar !== null) {
+      console.log('📅 [CalendarBrain] Resposta interceptada pelo Calendar');
+      await addMessage('user', message);
+      await addMessage('assistant', respostaCalendar);
+      return respostaCalendar;
+    }
+    console.log('=== PASSOU DO CALENDAR (não é agenda)');
+
+    // Passo 1: analisa
+    const analysis = await analyzeMessage(message);
+    console.log(`🧠 [Brain] Intenção: ${analysis.intent} | Emoção: ${analysis.emotion}`);
+
+    // Passo 2: escolhe estratégia
+    const strategy = chooseStrategy(analysis);
+    console.log(`🎯 [Brain] Estratégia: ${strategy.name}`);
+
+    // Passo 3: carrega memória (Supabase + local)
+    const memorySummary = await getMemorySummary();
+
+    // Passo 4: gera resposta
+    const ariaResponse = await generateResponse(message, analysis, strategy, memorySummary);
+
+    // Passo 5: salva na memória (Supabase + local)
+    await addMessage('user', message);
+    await addMessage('assistant', ariaResponse);
+
+    // Passo 6: processa ações automáticas
+    if (analysis.has_task && analysis.task_text) {
+      await addTask(analysis.task_text, analysis.urgency === 'high' ? 'alta' : 'média');
+      saveToObsidian('task', analysis.task_text, { priority: analysis.urgency === 'high' ? 'alta' : 'média' });
+    }
+    if (analysis.has_victory && analysis.victory_text) {
+      await addVictory(analysis.victory_text);
+    }
+    if (analysis.energy_mentioned && analysis.energy_level) {
+      await updateProfile({ last_energy: analysis.energy_level, last_energy_time: new Date().getHours() + 'h' });
+    }
+
+    // Passo 7: salva thinking log no Obsidian
+    saveThinkingLog(message, analysis, strategy, ariaResponse);
+
+    // Passo 8: extrai fatos automaticamente (fire-and-forget)
+    extrairEsalvarFatos(message, ariaResponse).catch(e => console.log('🧠 Extração async:', e.message));
+
+    // Passo 9: analytics (fire-and-forget)
+    registrarEvento('mensagem', { humor: detectarHumor(message), categoria: analysis.intent }).catch(() => {});
+
+    return ariaResponse;
+
+  } catch (error) {
+    console.error('Erro no Brain:', error.message);
+    await addMessage('user', message).catch(() => {});
+    const fallback = 'Ei, estou aqui! Tive um probleminha técnico agora. Pode repetir? 💜';
+    await addMessage('assistant', fallback).catch(() => {});
+    return fallback;
+  }
+}
+
+// ─────────────────────────────────────────────
+// THINK COM IMAGEM — para fotos e documentos visuais
+// ─────────────────────────────────────────────
+async function thinkWithImage(message, imageContent) {
+  try {
+    const { SYSTEM_PROMPT } = require('../prompts/system');
+    const evolvedAdditions = loadEvolvedPrompt();
+    const carolProfile = loadCarolProfile();
+    const memorySummary = await getMemorySummary();
+
+    let profileContext = '';
+    if (carolProfile) {
+      profileContext = `\n━━━ QUEM É A CAROL ━━━\n${carolProfile.profile?.preferred_name || 'Carol'}, ${carolProfile.profile?.profession || 'Arquiteta'}`;
+    }
+
+    const systemWithMemory = `${SYSTEM_PROMPT}
+${profileContext}
+
+━━━ MEMÓRIA ATIVA ━━━
+${memorySummary || 'Primeira conversa do dia.'}
+
+━━━ APRENDIZADOS DA ARIA ━━━
+${evolvedAdditions || 'Sem aprendizados adicionais ainda.'}
+
+━━━ INSTRUÇÃO ━━━
+Carol enviou uma imagem. Analise visualmente e responda de forma útil, conectando com o contexto dela se relevante.`;
+
+    const history = await getHistory();
+
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      system: systemWithMemory,
+      messages: [
+        ...history.slice(-6),
+        {
+          role: 'user',
+          content: [
+            imageContent,
+            { type: 'text', text: message },
+          ],
+        },
+      ],
+    });
+
+    const ariaResponse = response.content[0].text;
+
+    await addMessage('user', `[Imagem] ${message}`);
+    await addMessage('assistant', ariaResponse);
+
+    return ariaResponse;
+  } catch (error) {
+    console.error('Erro no Brain (imagem):', error.status, error.message);
+    console.error('Detalhes:', JSON.stringify(error.error || error.response?.data, null, 2));
+    if (error.status === 413) {
+      return 'Esse arquivo é grande demais pra eu processar de uma vez. Tenta mandar um menor ou me conta o que tem nele? 💜';
+    }
+    return 'Recebi seu arquivo mas tive um probleminha técnico. Pode mandar de novo? 💜';
+  }
+}
+
+module.exports = { think, thinkWithImage };

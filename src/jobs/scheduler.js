@@ -1,0 +1,279 @@
+const cron = require('node-cron');
+const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient } = require('../integrations/calendar');
+const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria } = require('../services/memorySupabase');
+const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/astrology');
+const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
+const { getCheckinMatinal } = require('../modules/holistic');
+const { buscarAniversariosProximos } = require('../services/crm');
+const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/analytics');
+const Anthropic = require('@anthropic-ai/sdk');
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const { sendTelegramMessage } = require('../services/telegram');
+const CAROL_CHAT_ID = process.env.TELEGRAM_CHAT_ID_CAROL;
+
+// ─── GERADOR DE MENSAGEM PROATIVA ────────────────────────────────────────────
+
+const gerarMensagemProativa = async (contexto) => {
+  const resp = await anthropic.messages.create({
+    model: 'claude-opus-4-5',
+    max_tokens: 600,
+    messages: [{
+      role: 'user',
+      content: `Você é a ARIA, assistente pessoal da Carol com TDAH. Gere uma mensagem proativa no Telegram.
+
+TIPO: ${contexto.tipo}
+CONTEXTO: ${JSON.stringify(contexto.dados)}
+
+REGRAS:
+- Use HTML do Telegram: <b>negrito</b>, <i>itálico</i>
+- Seja calorosa, gentil e direta — sem rodeios
+- Máximo 20 linhas
+- Termine sempre com UMA pergunta ou ação sugerida
+- Use emojis relevantes
+- Tom de amiga inteligente, não de robô
+
+Gere APENAS a mensagem, sem explicações.`
+    }]
+  });
+  return resp.content[0].text;
+};
+
+// ─── JOB 1: BRIEFING MATINAL — todo dia às 7h ────────────────────────────────
+
+const jobBriefingMatinal = async () => {
+  try {
+    const agora = new Date();
+    const diasSemana = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+    const agenda = await listarEventosHoje();
+    const agendaLimpa = agenda.replace(/<[^>]*>/g, '');
+    const lua = getFaseLunarLocal(agora);
+    const ayurveda = getContextoAyurveda();
+    const tarefas = await listarTarefas('aberta');
+    const memorias = await buscarMemorias(null, 10);
+
+    const numEventos = (agendaLimpa.match(/⏰/g) || []).length;
+    const agendaPesada = numEventos > 4;
+
+    const checkin = getCheckinMatinal();
+    const ayurvedaMsg = getMensagemAyurvedica(agora);
+
+    const msg = await gerarMensagemProativa({
+      tipo: 'briefing_matinal',
+      dados: {
+        dia: diasSemana[agora.getDay()],
+        data: agora.toLocaleDateString('pt-BR'),
+        agenda: agendaLimpa,
+        num_eventos: numEventos,
+        agenda_pesada: agendaPesada,
+        lua: `${lua.emoji} ${lua.mensagem_tdah}`,
+        energia_lua: lua.energia,
+        horario_ayurveda: `${ayurveda.bloco.nome} — ${ayurveda.estrategia.energia}`,
+        mensagem_ayurveda: ayurvedaMsg.replace(/<[^>]*>/g, ''),
+        alerta_tdah: ayurveda.estrategia.alerta_tdah,
+        checkin_4d: checkin.replace(/[🧍🧠💛⚡]/g, '').substring(0, 200),
+        tarefas_pendentes: tarefas.slice(0, 3).map(t => t.titulo),
+        memorias_relevantes: memorias.slice(0, 5).map(m => `${m.chave}: ${m.valor}`),
+        sugestao: agendaPesada ? 'Sugerir deixar agenda mais leve' : 'Encorajar o dia'
+      }
+    });
+
+    await sendTelegramMessage(CAROL_CHAT_ID, msg);
+    await salvarMemoria('sistema', 'ultimo_briefing', agora.toISOString(), 'cron job matinal');
+    console.log('[Scheduler] ✅ Briefing matinal enviado');
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro briefing matinal:', e.message);
+  }
+};
+
+// ─── JOB 2: LEMBRETES PRÉ-EVENTO — checa a cada 5min ────────────────────────
+
+const jobPreEvento = async () => {
+  try {
+    const agora = new Date();
+    const em30min = new Date(agora.getTime() + 30 * 60000);
+    const em31min = new Date(agora.getTime() + 31 * 60000);
+
+    const { google } = require('googleapis');
+    const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
+
+    // Busca em todos os calendários
+    const calIds = (process.env.GOOGLE_CALENDAR_IDS || 'primary').split(',');
+
+    for (const calId of calIds) {
+      try {
+        const res = await cal.events.list({
+          calendarId: calId.trim(),
+          timeMin: em30min.toISOString(),
+          timeMax: em31min.toISOString(),
+          singleEvents: true,
+        });
+
+        const eventos = (res.data.items || []).filter(e =>
+          !e.summary?.includes('Buffer') &&
+          !e.summary?.includes('🌿') &&
+          !e.summary?.includes('🚗')
+        );
+
+        for (const evento of eventos) {
+          const hora = new Date(evento.start.dateTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+          const msg = await gerarMensagemProativa({
+            tipo: 'pre_evento',
+            dados: {
+              evento: evento.summary,
+              hora: hora,
+              em_minutos: 30,
+              local: evento.location || 'não especificado'
+            }
+          });
+          await sendTelegramMessage(CAROL_CHAT_ID, msg);
+          console.log(`[Scheduler] ✅ Lembrete pré-evento: ${evento.summary}`);
+        }
+      } catch(e) {
+        // Silencia erro de calendário individual
+      }
+    }
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro pré-evento:', e.message);
+  }
+};
+
+// ─── JOB 3: RESUMO NOTURNO — todo dia às 22h ─────────────────────────────────
+
+const jobResumoNoturno = async () => {
+  try {
+    const historico = await buscarHistoricoRecente(16);
+    const tarefasPendentes = await listarTarefas('aberta');
+    const agenda = await listarEventosHoje();
+    const agendaLimpa = agenda.replace(/<[^>]*>/g, '');
+
+    const mensagensHoje = historico.filter(h => h.role === 'user').length;
+    const humoresHoje = historico.filter(h => h.humor).map(h => h.humor);
+
+    const msg = await gerarMensagemProativa({
+      tipo: 'resumo_noturno',
+      dados: {
+        agenda_do_dia: agendaLimpa,
+        tarefas_pendentes: tarefasPendentes.slice(0, 5).map(t => t.titulo),
+        num_interacoes: mensagensHoje,
+        humores_detectados: humoresHoje,
+        hora: '22h',
+        sugestao: 'Celebrar vitórias do dia, preparar amanhã'
+      }
+    });
+
+    await sendTelegramMessage(CAROL_CHAT_ID, msg);
+    await salvarMemoria('sistema', 'ultimo_resumo_noturno', new Date().toISOString(), 'cron job noturno');
+    console.log('[Scheduler] ✅ Resumo noturno enviado');
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro resumo noturno:', e.message);
+  }
+};
+
+// ─── JOB 4: PLANEJAMENTO SEMANAL — domingo às 18h ────────────────────────────
+
+const jobPlanejamentoSemanal = async () => {
+  try {
+    const semana = await listarEventosSemana();
+    const semanaLimpa = semana.replace(/<[^>]*>/g, '');
+    const tarefas = await listarTarefas('aberta');
+    const lua = getFaseLunarLocal(new Date());
+
+    const msg = await gerarMensagemProativa({
+      tipo: 'planejamento_semanal',
+      dados: {
+        proxima_semana: semanaLimpa,
+        tarefas_pendentes: tarefas.map(t => t.titulo),
+        lua: `${lua.emoji} ${lua.mensagem_tdah}`,
+        energia_lua: lua.energia,
+        sugestao: 'Planejar a semana com leveza, Rule of 3 por dia'
+      }
+    });
+
+    await sendTelegramMessage(CAROL_CHAT_ID, msg);
+    await salvarMemoria('sistema', 'ultimo_planejamento_semanal', new Date().toISOString(), 'cron job semanal');
+    console.log('[Scheduler] ✅ Planejamento semanal enviado');
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro planejamento semanal:', e.message);
+  }
+};
+
+// ─── INICIALIZAÇÃO DOS JOBS ───────────────────────────────────────────────────
+
+const iniciarScheduler = () => {
+  if (!CAROL_CHAT_ID) {
+    console.warn('[Scheduler] ⚠️ TELEGRAM_CHAT_ID_CAROL não configurado — scheduler desativado');
+    return;
+  }
+
+  // Briefing matinal — todo dia às 7h
+  cron.schedule('0 7 * * *', jobBriefingMatinal, { timezone: 'America/Bahia' });
+
+  // Pré-evento — checa a cada 5 minutos
+  cron.schedule('*/5 * * * *', jobPreEvento, { timezone: 'America/Bahia' });
+
+  // Resumo noturno — todo dia às 22h
+  cron.schedule('0 22 * * *', jobResumoNoturno, { timezone: 'America/Bahia' });
+
+  // Planejamento semanal — domingo às 18h
+  cron.schedule('0 18 * * 0', jobPlanejamentoSemanal, { timezone: 'America/Bahia' });
+
+  // Aniversários — todo dia às 8h
+  cron.schedule('0 8 * * *', async () => {
+    try {
+      const aniversarios = await buscarAniversariosProximos(2);
+      for (const p of aniversarios) {
+        const aniv = new Date(p.aniversario);
+        const hoje = new Date();
+        const proxAniv = new Date(hoje.getFullYear(), aniv.getMonth(), aniv.getDate());
+        const diff = Math.round((proxAniv - hoje) / (1000 * 60 * 60 * 24));
+
+        let msg = '';
+        if (diff === 0) {
+          msg = `🎂 <b>Hoje é aniversário de ${p.nome}!</b>\n\nQuer enviar uma mensagem? 💙`;
+        } else if (diff === 1) {
+          msg = `🎂 <b>Amanhã é aniversário de ${p.nome}!</b>\n\nQuer que eu te lembre de parabenizar? 💙`;
+        }
+
+        if (msg) await sendTelegramMessage(CAROL_CHAT_ID, msg);
+      }
+      console.log('[Scheduler] ✅ Job aniversários executado');
+    } catch(e) {
+      console.error('[Scheduler] ❌ Erro aniversários:', e.message);
+    }
+  }, { timezone: 'America/Bahia' });
+
+  // Relatório semanal — domingo às 17h
+  cron.schedule('0 17 * * 0', async () => {
+    try {
+      const relatorio = await gerarRelatorioSemanal();
+      await sendTelegramMessage(CAROL_CHAT_ID, '📊 <b>Seu relatório semanal chegou!</b>\n\n' + relatorio);
+      console.log('[Scheduler] ✅ Relatório semanal enviado');
+    } catch(e) {
+      console.error('[Scheduler] ❌ Erro relatório semanal:', e.message);
+    }
+  }, { timezone: 'America/Bahia' });
+
+  // Relatório mensal — dia 1 de cada mês às 9h
+  cron.schedule('0 9 1 * *', async () => {
+    try {
+      const relatorio = await gerarRelatorioMensal();
+      await sendTelegramMessage(CAROL_CHAT_ID, '📈 <b>Seu relatório mensal chegou!</b>\n\n' + relatorio);
+      console.log('[Scheduler] ✅ Relatório mensal enviado');
+    } catch(e) {
+      console.error('[Scheduler] ❌ Erro relatório mensal:', e.message);
+    }
+  }, { timezone: 'America/Bahia' });
+
+  console.log('[Scheduler] ✅ Jobs ativos:');
+  console.log('  🌅 Briefing matinal: todo dia às 7h');
+  console.log('  🎂 Aniversários: todo dia às 8h');
+  console.log('  ⏰ Pré-evento: a cada 5min');
+  console.log('  📊 Relatório semanal: domingo às 17h');
+  console.log('  📅 Planejamento semanal: domingo às 18h');
+  console.log('  🌙 Resumo noturno: todo dia às 22h');
+  console.log('  📈 Relatório mensal: dia 1 às 9h');
+};
+
+module.exports = { iniciarScheduler, jobBriefingMatinal, jobResumoNoturno, jobPlanejamentoSemanal };

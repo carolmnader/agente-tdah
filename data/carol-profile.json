@@ -1,0 +1,111 @@
+{
+  "profile": {
+    "name": "Carol",
+    "full_name": "Ana Carolina",
+    "preferred_name": "Carol",
+    "birth_date": "1992-05-12",
+    "birth_time": "10:50",
+    "birth_city": "Recife",
+    "birth_state": "Pernambuco",
+    "birth_country": "Brasil",
+    "age": 33,
+    "current_cities": ["São Paulo", "Recife"],
+    "profession": "Arquiteta e Urbanista",
+    "current_status": "Transição de carreira — encerrou sociedade em janeiro de 2026, buscando reinvenção profissional"
+  },
+
+  "health": {
+    "diagnoses": ["TDAH", "Depressão/ansiedade (tratamento medicamentoso ativo)"],
+    "medications": {
+      "morning": [
+        { "name": "Rexulti", "dose": "1mg", "type": "antipsicótico atípico / estabilizador de humor" },
+        { "name": "Venlift", "dose": "75mg", "type": "antidepressivo ISRSN" },
+        { "name": "Concerta", "dose": "36mg", "type": "metilfenidato — tratamento TDAH" }
+      ],
+      "night": [
+        { "name": "Razapina", "dose": "45mg", "type": "antidepressivo / auxílio ao sono" }
+      ]
+    },
+    "health_team": {
+      "psychologist": {
+        "frequency": "1x por semana",
+        "day": "sexta-feira",
+        "time": "13:00"
+      }
+    },
+    "health_goals_2026": ["Saúde física e mental como pilar", "Exercícios físicos regulares", "Meditação"]
+  },
+
+  "astrology": {
+    "sun_sign": "Touro",
+    "notes": "Nascida em 12/05 — Sol em Touro. Lua e ascendente precisam de cálculo com horário e local (Recife, 10:50)"
+  },
+
+  "tdah_profile": {
+    "main_struggles": [
+      "Procrastinação crônica",
+      "Falta de energia e motivação",
+      "Desregulação emocional",
+      "Vícios e comportamentos compulsivos",
+      "Dificuldade com recompensas de longo prazo",
+      "Iniciar tarefas sem estrutura clara"
+    ],
+    "what_works": [
+      "Música (fundamental para foco)",
+      "Timers e Pomodoro",
+      "Listas visuais e organizadas",
+      "Rotina estruturada e previsível",
+      "Conteúdo visual e graficamente interessante",
+      "Recompensas imediatas e pequenas vitórias"
+    ],
+    "what_doesnt_work": [
+      "Tarefas com recompensa de longo prazo sem marcos intermediários",
+      "Ambiente sem estrutura",
+      "Pressão excessiva e cobranças"
+    ],
+    "peak_energy_time": "manhã até 14h",
+    "energy_pattern": "Melhor energia pela manhã — tarefas difíceis antes das 14h, tarefas leves depois",
+    "overload_triggers": ["desorganização", "muitas decisões ao mesmo tempo", "falta de clareza sobre próximo passo"]
+  },
+
+  "professional": {
+    "degree": "Arquitetura e Urbanismo",
+    "skills": ["Curadoria estética", "Design de interiores", "Storytelling visual", "Branding criativo"],
+    "learning_goals": [
+      "ArchiCAD (prioridade alta)",
+      "Desenho técnico (lacuna identificada)",
+      "Ferramentas de IA para arquitetura",
+      "Claude e automação para trabalho criativo"
+    ],
+    "interests": [
+      "Usar IA para aprimorar trabalho como arquiteta",
+      "Reinvenção profissional",
+      "Explorar mercado de tecnologia + arquitetura"
+    ],
+    "collaborations": [
+      "Naiade Lins — artista plástica, ajuda com storytelling e conteúdo em vídeo",
+      "Carlota Inchaustegui — parceira de branding e negócios"
+    ],
+    "financial_goal_2026": "Dobrar a renda"
+  },
+
+  "personal": {
+    "family": {
+      "nephew": "TomTom — sobrinho muito amado, fascinado pela lua"
+    },
+    "close_friends": ["Naiade Lins", "Carlota Inchaustegui"],
+    "interests": {
+      "literature": ["Clarice Lispector", "Dostoiévski", "Dante Alighieri (Divina Comédia)"],
+      "cinema": ["O Curioso Caso de Benjamin Button", "Efeito Borboleta", "Normal People", "The Good Place"],
+      "music": ["Drops House", "Chillhouse"],
+      "languages": ["Aprendendo francês do zero"],
+      "photography": ["Câmera analógica Polaroid Now+"],
+      "travel": "Luxo não óbvio, Europa, viagens de trem, Natal em Viena 2026"
+    }
+  },
+
+  "aria_instructions": "Carol é uma arquiteta em transição de carreira, com TDAH diagnosticado e tratamento ativo. Ela tem mais energia de manhã até 14h — priorize tarefas difíceis nesse período. Sempre quebre projetos em micro-passos visuais e use timers. Ela responde bem a música e elementos gráficos. Evite recompensas de longo prazo sem marcos intermediários. Celebre cada pequena vitória — seu cérebro precisa de dopamina imediata. Quando ela estiver sobrecarregada, valide primeiro, depois ofereça UMA ação pequena. Ela está num momento de reinvenção — seja encorajadora, criativa e visionária com ela. Nunca a pressione ou compare. Lembre que sexta às 13h ela tem psicólogo.",
+
+  "imported_at": "2026-04-09",
+  "source": "Gemini + informações diretas da Carol"
+}

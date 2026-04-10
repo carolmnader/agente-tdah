@@ -1,0 +1,6 @@
+node_modules/
+.env
+.env.local
+*.txt
+src/client_secret*.json
+src/client_secret*.json

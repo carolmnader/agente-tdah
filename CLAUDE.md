@@ -1,23 +1,10 @@
-# CLAUDE.md
+# Para o Claude Code
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Sempre leia as páginas do Notion antes de qualquer tarefa.
+Hub do projeto: https://www.notion.so/33c348c5f7228174a6c1c821f5579aaa
+Contexto: https://www.notion.so/33c348c5f72281dab9c7ed4cf82e932a
+Status: https://www.notion.so/33c348c5f72281ea972bffef0c18d03f
 
-## Project
-
-**agente-tdah** — (TODO: add project description and purpose)
-
-## Build & Run
-
-<!-- Fill in as the project develops -->
-<!-- Example:
-- Install: `npm install`
-- Dev: `npm run dev`
-- Build: `npm run build`
-- Test: `npm test`
-- Single test: `npm test -- path/to/test`
-- Lint: `npm run lint`
--->
-
-## Architecture
-
-<!-- Document high-level architecture decisions here as the codebase grows -->
+Este é um projeto de Agente WhatsApp para TDAH.
+Carol é a criadora e usuária-teste.
+Sempre atualize _STATUS após concluir algo.
