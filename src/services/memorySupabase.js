@@ -384,6 +384,32 @@ async function limparAcaoPendente(chatId) {
   if (error) console.error('Erro ao limpar ação pendente:', error.message);
 }
 
+// ━━━ IDEMPOTÊNCIA WEBHOOK (Bug #8) ━━━
+
+// INSERT atômico via PK conflict. Retorna { duplicado: true } se update_id já
+// foi processado, { duplicado: false } se é primeira vez.
+// Lazy cleanup: 1% das chamadas, deleta rows > 24h (não-bloqueante).
+async function marcarUpdateProcessado(updateId) {
+  if (!updateId) return { duplicado: false }; // fail-open se falta update_id
+  const { error } = await supabase
+    .from('webhook_updates')
+    .insert({ update_id: updateId })
+    .select()
+    .single();
+
+  if (error?.code === '23505') return { duplicado: true }; // PK conflict = retry Telegram
+  if (error) console.error('Erro idempotência webhook (não-bloqueante):', error.message);
+
+  // Lazy cleanup (1% das vezes, fire-and-forget)
+  if (Math.random() < 0.01) {
+    const limite = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    supabase.from('webhook_updates').delete().lt('processado_em', limite)
+      .then(({ error: e }) => { if (e) console.error('Cleanup webhook_updates:', e.message); });
+  }
+
+  return { duplicado: false };
+}
+
 // ━━━ COMPATIBILIDADE — funções do memory.js antigo ━━━
 
 const fs = require('fs');
@@ -478,6 +504,7 @@ module.exports = {
   salvarAcaoPendente,
   buscarAcaoPendente,
   limparAcaoPendente,
+  marcarUpdateProcessado,
   // Compatibilidade
   addMessage,
   getHistory,

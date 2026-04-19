@@ -3,11 +3,20 @@ const { think, thinkWithImage } = require("../services/brain");
 const { enviarMensagemLonga, sendTelegramMessage } = require("../services/telegram");
 const { downloadTelegramFile, imageToBase64, extractTextFromBuffer, isImage, isPdf, processPdf } = require("../services/fileReader");
 const { transcreverAudio } = require("../services/audioTranscriber");
+const { marcarUpdateProcessado } = require("../services/memorySupabase");
 
 const router = express.Router();
 
 router.post("/telegram", async (req, res) => {
   console.log(`🔔 [Telegram] Webhook recebido:`, JSON.stringify(req.body).substring(0, 300));
+
+  // Idempotência (Bug #8): se Telegram fez retry do mesmo update_id, ignora.
+  const { duplicado } = await marcarUpdateProcessado(req.body?.update_id);
+  if (duplicado) {
+    console.log(`🔔 [Telegram] update_id ${req.body.update_id} já processado, retry ignorado`);
+    return res.sendStatus(200);
+  }
+
   const message = req.body.message;
   if (!message) {
     console.log(`🔔 [Telegram] Sem campo message, ignorando`);

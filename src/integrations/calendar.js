@@ -14,6 +14,27 @@ const getCalendar = () => google.calendar({ version: 'v3', auth: getAuthClient()
 
 const TIMEZONE = 'America/Sao_Paulo';
 
+// Caps automáticos quando recorrência sem fim explícito (UNTIL/COUNT)
+// Evita "lixo eterno" no Calendar — Carol revisita trimestralmente.
+const CAP_PADRAO_RECORRENCIA = { daily: 90, weekly: 26, monthly: 12 };
+
+function construirRRULE({ frequencia, dias_semana = null, ate_data = null, contagem = null, intervalo = 1 }) {
+  if (!CAP_PADRAO_RECORRENCIA[frequencia]) {
+    throw new Error(`frequencia inválida: ${frequencia} (esperado daily|weekly|monthly)`);
+  }
+  const partes = [`FREQ=${frequencia.toUpperCase()}`];
+  if (intervalo > 1) partes.push(`INTERVAL=${intervalo}`);
+  if (dias_semana?.length) partes.push(`BYDAY=${dias_semana.join(',')}`);
+  if (contagem) partes.push(`COUNT=${contagem}`);
+  else if (ate_data) {
+    const d = new Date(ate_data + 'T23:59:59Z');
+    partes.push(`UNTIL=${d.toISOString().replace(/[-:]/g, '').split('.')[0]}Z`);
+  } else {
+    partes.push(`COUNT=${CAP_PADRAO_RECORRENCIA[frequencia]}`);
+  }
+  return 'RRULE:' + partes.join(';');
+}
+
 // Mapa completo: ID → { nome, emoji }
 const CALENDARIOS = {
   'carolinamnader@gmail.com': { nome: 'Selfcare', emoji: '💪' },
@@ -250,7 +271,9 @@ function detectarCategoria(titulo) {
 const detectarCalendario = (titulo) => getCalendarId(detectarCategoria(titulo));
 
 // 3. CRIAR EVENTO — com cor e calendário automáticos
-const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categoriaPassada = null) => {
+// Bug #6: aceita parâmetro opcional `recurrence` (string RRULE). Se presente,
+// adiciona ao payload do evento E PULA criação do buffer (evita N buffers em série).
+const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categoriaPassada = null, recurrence = null) => {
   try {
     const cal = getCalendar();
 
@@ -259,7 +282,6 @@ const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categori
     if (categoriaPassada && CALENDARIO_POR_NOME[categoriaPassada]) {
       categoria = categoriaPassada;
     } else if (categoriaPassada && CALENDARIOS[categoriaPassada]) {
-      // É um ID direto — resolve para nome
       categoria = getCalendarioInfo(categoriaPassada).nome;
     } else {
       categoria = detectarCategoria(titulo);
@@ -270,7 +292,6 @@ const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categori
     const info = getCalendarioInfo(calendarId);
     const inicio = new Date(dataHoraInicio);
     const fim = new Date(inicio.getTime() + duracaoMinutos * 60000);
-    const bufferFim = new Date(fim.getTime() + 20 * 60000);
 
     // Salva categorização na memória para aprender
     try {
@@ -278,22 +299,32 @@ const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categori
       await salvarMemoria('categorizacao', titulo.toLowerCase().substring(0, 30), categoria, 'aprendido ao criar');
     } catch(e) { /* silencia se Supabase não disponível */ }
 
-    await cal.events.insert({ calendarId, resource: {
+    const eventResource = {
       summary: titulo,
       colorId: config.cor,
       start: { dateTime: inicio.toISOString(), timeZone: TIMEZONE },
       end: { dateTime: fim.toISOString(), timeZone: TIMEZONE }
-    }});
+    };
+    if (recurrence) eventResource.recurrence = [recurrence];
 
-    await cal.events.insert({ calendarId, resource: {
-      summary: '🌿 Buffer / Transição', colorId: '8',
-      start: { dateTime: fim.toISOString(), timeZone: TIMEZONE },
-      end: { dateTime: bufferFim.toISOString(), timeZone: TIMEZONE }
-    }});
+    await cal.events.insert({ calendarId, resource: eventResource });
+
+    // Buffer só pra eventos não-recorrentes (evita N buffers em série)
+    if (!recurrence) {
+      const bufferFim = new Date(fim.getTime() + 20 * 60000);
+      await cal.events.insert({ calendarId, resource: {
+        summary: '🌿 Buffer / Transição', colorId: '8',
+        start: { dateTime: fim.toISOString(), timeZone: TIMEZONE },
+        end: { dateTime: bufferFim.toISOString(), timeZone: TIMEZONE }
+      }});
+    }
 
     const dia = `${formatarDiaSemana(inicio)}, ${inicio.toLocaleDateString('pt-BR')}`;
     const hora = formatarHora(inicio.toISOString());
 
+    if (recurrence) {
+      return `🔁 <b>Recorrência criada!</b>\n\n${info.emoji} ${titulo}\n📅 Início: ${dia} às ${hora}\n⏱️ ${duracaoMinutos}min cada\n🔢 ${recurrence.replace('RRULE:', '')}\n📂 Agenda: ${info.nome}`;
+    }
     return `✅ <b>Agendado!</b>\n\n${info.emoji} ${titulo}\n📅 ${dia} às ${hora}\n⏱️ ${duracaoMinutos}min\n🌿 Buffer de 20min reservado\n📂 Agenda: ${info.nome}\n\nQuer ajustar algo?`;
   } catch(e) { return `❌ Erro ao criar evento: ${e.message}`; }
 };
@@ -424,4 +455,4 @@ const proximoHorarioLivre = async (duracaoMinutos = 60) => {
   } catch(e) { return `❌ Erro: ${e.message}`; }
 };
 
-module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS };
+module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA };

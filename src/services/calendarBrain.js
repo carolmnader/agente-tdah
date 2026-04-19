@@ -66,8 +66,24 @@ const REGEX_NOME_CALENDARIO = new RegExp(`\\b(${NOMES_CALENDARIOS.map(n => n.rep
 const REGEX_HORARIO_TEXTO = /\b(\d{1,2}[:h]\d{0,2}|\d{1,2}\s*h(oras?)?|meio[-\s]?dia|meia[-\s]?noite)\b/i;
 const REGEX_VERBO_MUDANCA = /\b(muda|mudar|passa|passar|move|mover|joga|jogar|coloca|colocar|p[oõ]e|p[oõ]r|categoriza|recategoriza)\b/i;
 
+// Padrões pt-BR de recorrência (Bug #6)
+const PADROES_RECORRENCIA = [
+  /\b(todos?\s+(os\s+)?dias?|diariamente|todo\s+dia)\b/i,
+  /\btoda\s+(segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo)\b/i,
+  /\b(toda\s+semana|semanalmente)\b/i,
+  /\b(todo\s+m[eê]s|mensalmente|todo\s+dia\s+\d{1,2}\b)\b/i,
+  /\b(de\s+segunda\s+a\s+sexta|seg\s+a\s+sex)\b/i,
+];
+const REGEX_ESSA_SEMANA = /\b(essa|esta|nessa|nesta)\s+semana\b/i;
+
 function dicaIntent(msg) {
-  if (!msg || !REGEX_VERBO_MUDANCA.test(msg)) return null;
+  if (!msg) return null;
+  // Recorrência tem prioridade — verbo de criação ("agenda"/"cria") não está no REGEX_VERBO_MUDANCA
+  if (PADROES_RECORRENCIA.some(re => re.test(msg))) {
+    if (REGEX_ESSA_SEMANA.test(msg)) return null; // escopo curto → criar_lote (Opus decide)
+    return 'criar_recorrente';
+  }
+  if (!REGEX_VERBO_MUDANCA.test(msg)) return null;
   const temCalendario = REGEX_NOME_CALENDARIO.test(msg);
   const temHorario = REGEX_HORARIO_TEXTO.test(msg);
   if (temCalendario && !temHorario) return 'mudar_calendario';
@@ -227,6 +243,11 @@ const executarAcaoConfirmada = async (pendente) => {
     if (tipo === 'criar_lote') {
       return await executarCriarLote(params.eventos);
     }
+    if (tipo === 'criar_recorrente') {
+      const { titulo, hora, duracao_minutos, categoria, data_inicio, rrule } = params;
+      const dh = resolverDataHora(data_inicio, hora);
+      return await criarEvento(titulo, dh, duracao_minutos, categoria, rrule);
+    }
     return '❌ Ação pendente desconhecida.';
   } catch (e) {
     console.error('[CalendarBrain] Erro ao executar ação confirmada:', e.message);
@@ -291,9 +312,30 @@ EXEMPLOS DE DESAMBIGUAÇÃO:
 
 ATENÇÃO: se a "Dica do pré-classificador" do CONTEXTO indicar uma ação ('reagendar' ou 'mudar_calendario'), prefira ela — só desvie se a mensagem da Carol contradiz claramente.
 
+RECORRÊNCIA / SEQUÊNCIA / ROTINA (Bug #6):
+- Use criar_recorrente quando a frase indicar REPETIÇÃO: "todos os dias", "diariamente", "toda segunda/terça/...", "todo mês", "de segunda a sexta", "semanalmente".
+- frequencia: "daily" (todos os dias), "weekly" (toda segunda OU "de segunda a sexta"), "monthly" (todo mês, todo dia X).
+- dias_semana: ["MO","TU","WE","TH","FR","SA","SU"] — só pra weekly. "de segunda a sexta" → ["MO","TU","WE","TH","FR"]. "toda quarta" → ["WE"].
+- ate_data (UNTIL): "até dezembro" → "2026-12-31"; "até 30/04" → "2026-04-30". Formato YYYY-MM-DD.
+- contagem (COUNT): "por 5 dias", "5 vezes", "por 3 semanas" → number.
+- Sem ate_data nem contagem → cap automático (90 daily / 26 weekly / 12 monthly) aplicado pelo código.
+- "essa semana"/"esta semana" → NÃO é criar_recorrente, é criar_lote (escopo curto, gere 5-7 eventos one-off).
+- "próxima segunda"/"próximo mês" → NÃO é criar_recorrente, é criar simples (1 evento na data específica).
+- Mensagem sem palavra de repetição ("almoço amanhã às 13h") → criar simples, NÃO criar_recorrente.
+
+EXEMPLOS DE RECORRÊNCIA:
+- "almoço todos os dias às 13h" → criar_recorrente, frequencia="daily", hora="13:00"
+- "reunião toda segunda às 9h" → criar_recorrente, frequencia="weekly", dias_semana=["MO"], hora="09:00"
+- "academia segunda a sexta às 7h" → criar_recorrente, frequencia="weekly", dias_semana=["MO","TU","WE","TH","FR"], hora="07:00"
+- "psicólogo toda quarta até dezembro" → criar_recorrente, frequencia="weekly", dias_semana=["WE"], ate_data="2026-12-31"
+- "almoço todos os dias por 5 dias" → criar_recorrente, frequencia="daily", contagem=5
+- "almoço essa semana às 13h" → criar_lote (NÃO criar_recorrente)
+- "reunião próxima segunda às 14h" → criar simples (1 evento, NÃO criar_recorrente)
+- "almoço hoje às 13h" → criar simples (sem palavra de repetição)
+
 RETORNE APENAS JSON:
 {
-  "acao": "ver_hoje|ver_semana|criar|criar_lote|reagendar|cancelar|horario_livre|reorganizar|mudar_calendario|nao_e_calendar",
+  "acao": "ver_hoje|ver_semana|criar|criar_lote|criar_recorrente|reagendar|cancelar|horario_livre|reorganizar|mudar_calendario|nao_e_calendar",
   "titulo": "emoji + nome ou null",
   "data": "hoje|amanha|segunda|terca|quarta|quinta|sexta|sabado|domingo|DD/MM|null",
   "hora": "HH:MM|null",
@@ -304,6 +346,12 @@ RETORNE APENAS JSON:
   "nova_data": "string|null",
   "calendario": "Trabalho|Estudo|Eventos|Selfcare|null",
   "eventos": [{"titulo":"emoji+nome","data":"string","hora":"HH:MM","duracao_minutos":number,"calendario":"string","deslocamento_antes":number}]|null,
+  "frequencia": "daily|weekly|monthly|null",
+  "dias_semana": ["MO","TU","WE","TH","FR","SA","SU"]|null,
+  "ate_data": "YYYY-MM-DD|null",
+  "contagem": number|null,
+  "intervalo": number|1,
+  "data_inicio": "hoje|amanha|segunda|...|YYYY-MM-DD|null",
   "apelido_aprendido": {"termo":"string","evento_real":"string"}|null,
   "raciocinio": "explicação em 1 linha"
 }`;
@@ -437,6 +485,39 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       }
       // 1 evento só em lote: cria direto
       return await executarCriarLote(intent.eventos);
+    }
+
+    // CRIAR RECORRENTE — guard com mensagem rica mostrando cap explícito
+    if (intent.acao === 'criar_recorrente') {
+      if (!intent.hora) return '📅 Que horas? (ex: 13:00)';
+      if (!intent.frequencia) return '📅 Com que frequência? (todos os dias / toda semana / todo mês)';
+      const { CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA } = require('../integrations/calendar');
+      const tituloFinal = adicionarEmoji(intent.titulo || 'Evento');
+      const categoria = intent.calendario || categorizarEvento(tituloFinal);
+      let rrule;
+      try {
+        rrule = construirRRULE({
+          frequencia: intent.frequencia,
+          dias_semana: intent.dias_semana,
+          ate_data: intent.ate_data,
+          contagem: intent.contagem,
+          intervalo: intent.intervalo || 1,
+        });
+      } catch (e) { return `❌ Erro na recorrência: ${e.message}`; }
+      const capInfo = intent.contagem
+        ? `${intent.contagem} ocorrências`
+        : intent.ate_data
+          ? `até ${intent.ate_data}`
+          : `${CAP_PADRAO_RECORRENCIA[intent.frequencia]} ocorrências (cap padrão)`;
+      const freqLabel = { daily: 'Diariamente', weekly: 'Semanalmente', monthly: 'Mensalmente' }[intent.frequencia];
+      const diasLabel = intent.dias_semana?.length ? ` (${intent.dias_semana.join(',')})` : '';
+      const config = CATEGORIAS[categoria] || CATEGORIAS['Trabalho'] || { emoji: '💼' };
+      const data_inicio = intent.data_inicio || intent.data || 'hoje';
+      await salvarAcaoPendente(chatId, {
+        tipo: 'criar_recorrente',
+        params: { titulo: tituloFinal, hora: intent.hora, duracao_minutos: intent.duracao_minutos || 60, categoria, data_inicio, rrule },
+      });
+      return `🔁 <b>Vou criar "${tituloFinal}" como recorrente:</b>\n\n📅 ${freqLabel}${diasLabel} às ${intent.hora}\n⏱️ ${intent.duracao_minutos || 60}min cada\n🔢 Cap: ${capInfo}\n📂 Calendário: ${config.emoji} ${categoria}\n📅 Início: ${data_inicio}\n\n<b>Confirma?</b> Responda "sim" ou "não".`;
     }
 
     // REAGENDAR — pede confirmação
