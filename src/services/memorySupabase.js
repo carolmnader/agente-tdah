@@ -76,16 +76,17 @@ async function salvarMensagem(role, content, extras = {}) {
 }
 
 async function buscarHistorico(limite = 20) {
+  // Pega as N mais RECENTES (DESC + LIMIT) e devolve em ordem cronológica (ASC) pro Claude.
+  // Bug anterior: ASC + LIMIT retornava as N MAIS ANTIGAS, fazendo a ARIA conversar com histórico congelado.
   const { data, error } = await supabase
     .from('mensagens')
     .select('role, content, created_at')
-    .order('created_at', { ascending: true })
+    .order('created_at', { ascending: false })
     .limit(limite);
 
   if (error) { console.error('Erro ao buscar histórico:', error.message); return []; }
 
-  // Retorna no formato que o Claude espera
-  return (data || []).map(m => ({
+  return (data || []).reverse().map(m => ({
     role: m.role,
     content: m.content,
   }));
@@ -155,27 +156,31 @@ async function concluirTarefa(termoBusca) {
 // ━━━ PESSOAS ━━━
 
 async function salvarPessoa(nome, relacionamento = null, extras = {}) {
+  // Schema real de pessoas tem 'notas' (text), não 'detalhes' (jsonb).
+  // Serializa extras → string e faz append em notas.
+  const notasNova = (extras && typeof extras === 'object' && Object.keys(extras).length)
+    ? Object.entries(extras).map(([k, v]) => `${k}: ${v}`).join('; ')
+    : '';
   const { data: existing } = await supabase
     .from('pessoas')
-    .select('id, detalhes')
+    .select('id, notas')
     .ilike('nome', nome)
     .limit(1);
 
   if (existing?.length > 0) {
-    const detalhesAtuais = existing[0].detalhes || {};
+    const notasAtuais = existing[0].notas || '';
     const { error } = await supabase
       .from('pessoas')
       .update({
         relacionamento: relacionamento || undefined,
-        detalhes: { ...detalhesAtuais, ...extras },
-        updated_at: new Date().toISOString(),
+        notas: notasNova ? (notasAtuais ? `${notasAtuais}\n${notasNova}` : notasNova) : notasAtuais,
       })
       .eq('id', existing[0].id);
     if (error) console.error('Erro ao atualizar pessoa:', error.message);
   } else {
     const { error } = await supabase
       .from('pessoas')
-      .insert({ nome, relacionamento, detalhes: extras });
+      .insert({ nome, relacionamento, notas: notasNova || null });
     if (error) console.error('Erro ao salvar pessoa:', error.message);
   }
 }
@@ -333,24 +338,50 @@ async function buildMemoryContext() {
     }
   }
 
-  // Pessoas via CRM
-  try {
-    const { buildPessoasContext } = require('./crm');
-    const pessoasCtx = await buildPessoasContext();
-    ctx += pessoasCtx;
-  } catch(e) {
-    // Fallback simples se CRM não disponível
-    const { data: pessoas } = await supabase
-      .from('pessoas')
-      .select('nome, relacionamento')
-      .limit(10);
-    if (pessoas?.length > 0) {
-      ctx += '\n\n━━━ PESSOAS ━━━';
-      ctx += '\n' + pessoas.map(p => `${p.nome}${p.relacionamento ? ` (${p.relacionamento})` : ''}`).join(' | ');
-    }
-  }
+  // Pessoas: agora injetadas contextualmente em generateResponse via
+  // crm.buildPessoasContextoMensagem(nomes), filtrando só as mencionadas no turno atual.
 
   return ctx;
+}
+
+// ━━━ AÇÕES PENDENTES (guard de confirmação para Calendar) ━━━
+
+const ACAO_PENDENTE_TIMEOUT_MS = 5 * 60 * 1000;
+
+async function salvarAcaoPendente(chatId, { tipo, params }) {
+  const { error } = await supabase
+    .from('acoes_pendentes')
+    .upsert({
+      chat_id: chatId,
+      tipo,
+      params,
+      criada_em: new Date().toISOString(),
+    }, { onConflict: 'chat_id' });
+  if (error) console.error('Erro ao salvar ação pendente:', error.message);
+}
+
+async function buscarAcaoPendente(chatId) {
+  const { data, error } = await supabase
+    .from('acoes_pendentes')
+    .select('tipo, params, criada_em')
+    .eq('chat_id', chatId)
+    .maybeSingle();
+  if (error) { console.error('Erro ao buscar ação pendente:', error.message); return null; }
+  if (!data) return null;
+  const idade = Date.now() - new Date(data.criada_em).getTime();
+  if (idade > ACAO_PENDENTE_TIMEOUT_MS) {
+    await limparAcaoPendente(chatId);
+    return null;
+  }
+  return { tipo: data.tipo, params: data.params, criadaEm: data.criada_em };
+}
+
+async function limparAcaoPendente(chatId) {
+  const { error } = await supabase
+    .from('acoes_pendentes')
+    .delete()
+    .eq('chat_id', chatId);
+  if (error) console.error('Erro ao limpar ação pendente:', error.message);
 }
 
 // ━━━ COMPATIBILIDADE — funções do memory.js antigo ━━━
@@ -444,6 +475,9 @@ module.exports = {
   buildMemoryContext,
   detectarHumor,
   salvarHumor,
+  salvarAcaoPendente,
+  buscarAcaoPendente,
+  limparAcaoPendente,
   // Compatibilidade
   addMessage,
   getHistory,

@@ -7,13 +7,28 @@ const { getFaseLunar, getContextoAstrologico } = require('../integrations/astrol
 const { getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holistic-context');
 const { processarCalendar } = require('./calendarBrain');
-const { buscarPessoaInteligente, formatarPessoa } = require('./crm');
+const { buscarPessoaInteligente, formatarPessoa, salvarOuAtualizarPessoa, buildPessoasContextoMensagem } = require('./crm');
 const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 // Cache do check-in mais recente da Carol
 let ultimoCheckin = null;
+
+// ─── Helpers para detecção de nomes recentes (regra dos 3 turnos) ───
+const NOMES_STOPWORDS = new Set([
+  'ARIA','Carol','Saúde','Trabalho','Eventos','Selfcare','Lazer','Estudo',
+  'Faculdade','Burocracia','Lar','Casa','Mercado','Banco','Bom','Boa','Olá'
+]);
+
+function extrairNomesDoTexto(texto) {
+  const regex = /\b[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]{2,}(?:\s+[A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]{2,})?\b/g;
+  return [...new Set(texto.match(regex) || [])].filter(n => !NOMES_STOPWORDS.has(n.split(' ')[0]));
+}
+
+function getNomesRecentes(history, turnos = 3) {
+  return history.slice(-turnos).flatMap(m => extrairNomesDoTexto(m.content || ''));
+}
 
 // ─────────────────────────────────────────────
 // PASSO 1 — Analisa a mensagem (pensamento rápido)
@@ -39,8 +54,20 @@ Responda exatamente neste formato:
   "victory_text": "texto da vitória se houver, senão null",
   "energy_mentioned": true/false,
   "energy_level": "low|medium|high|null",
-  "thinking_note": "uma frase sobre o que Carol realmente precisa agora"
-}`
+  "thinking_note": "uma frase sobre o que Carol realmente precisa agora",
+  "nomes_mencionados": ["primeiros nomes ou primeiro+último de PESSOAS mencionadas, [] se nenhuma"],
+  "pessoas_pergunta_sobre": true/false
+}
+
+REGRAS para nomes_mencionados:
+- Extraia apenas nomes próprios DE PESSOAS (não confunda com objetos, comidas, lugares).
+- NUNCA inclua: "ARIA", "Carol", dias da semana (segunda, terça...), meses, calendários (Saúde, Trabalho, Eventos, Selfcare, Lazer, Estudo, Faculdade, Burocracia, Lar/Pets), saudações.
+- Use o nome como Carol falou (ex: "Marcela", "Dr. João", "Ana Maria").
+- Se não houver pessoa nenhuma, retorne [].
+
+REGRA para pessoas_pergunta_sobre:
+- true se Carol está PERGUNTANDO sobre alguém ("quem é X", "lembra da Y", "fala da Z", "me conta da W").
+- false se for uma menção em passagem ("almoço com Marcela", "vou ligar pra Ana").`
     }]
   });
 
@@ -58,7 +85,9 @@ Responda exatamente neste formato:
       victory_text: null,
       energy_mentioned: false,
       energy_level: null,
-      thinking_note: 'Responder com atenção e cuidado'
+      thinking_note: 'Responder com atenção e cuidado',
+      nomes_mencionados: [],
+      pessoas_pergunta_sobre: false,
     };
   }
 }
@@ -117,7 +146,7 @@ function chooseStrategy(analysis) {
 // ─────────────────────────────────────────────
 // PASSO 3 — Gera a resposta final
 // ─────────────────────────────────────────────
-async function generateResponse(message, analysis, strategy, memorySummary) {
+async function generateResponse(message, analysis, strategy, memorySummary, pessoasInfo = {}) {
   const { SYSTEM_PROMPT } = require('../prompts/system');
 
   const evolvedAdditions = loadEvolvedPrompt();
@@ -187,12 +216,18 @@ Skills: ${skills.join(', ')}
 Meta 2026: ${meta}`;
   }
 
+  const novasInstrucao = pessoasInfo?.novas?.length > 0
+    ? `\n━━━ PESSOAS NOVAS DETECTADAS ━━━\nPessoas que Carol mencionou e ainda não conheço: ${pessoasInfo.novas.join(', ')}.\nTermine sua resposta com UMA linha curta perguntando quem é (ex: "💭 Quem é ${pessoasInfo.novas[0]}? Curiosa!").\nNão interrompa o fluxo principal — a pergunta vem DEPOIS da resposta normal.`
+    : '';
+
   const systemWithMemory = `${SYSTEM_PROMPT}
 ${profileContext}
 ${holisticContext}
 
 ━━━ MEMÓRIA ATIVA ━━━
 ${memorySummary || 'Primeira conversa do dia.'}
+${pessoasInfo?.contextoStr || ''}
+${novasInstrucao}
 
 ━━━ APRENDIZADOS DA ARIA ━━━
 ${evolvedAdditions || 'Sem aprendizados adicionais ainda.'}
@@ -250,15 +285,19 @@ function saveThinkingLog(message, analysis, strategy, ariaResponse) {
 // ─────────────────────────────────────────────
 // ORQUESTRADOR PRINCIPAL — roda tudo em sequência
 // ─────────────────────────────────────────────
-async function think(message) {
+async function think(message, chatId = null) {
   try {
     const lower = message.toLowerCase().trim();
 
-    // Passo 0-PRE: Se conversa anterior foi Calendar e Carol pergunta se funcionou
+    // Passo 0-PRE: Se ARIA ACABOU DE confirmar criação/edição de evento e Carol pergunta se funcionou
+    // Bug anterior: regex era amplo demais (calendar/agenda/📅 qualquer + consegue/atualizou/verificar/teste)
+    // → qualquer msg com "consegue" ou "atualizou" virava string hardcoded "Verifique seu Google Calendar".
+    // Fix: exige marcador explícito de SUCESSO na última resposta + pergunta específica sobre o resultado.
     const history = await getHistory();
     const ultimaMsgAssistant = history.length >= 1 ? (history[history.length - 1]?.content || '') : '';
-    const eraCalendar = /calendar|agenda|agend|event|compromiss|📅|✅.*gendado/i.test(ultimaMsgAssistant);
-    if (eraCalendar && /funcionou|apareceu|criou|consegue|atualizou|teste|verificar|deu certo/i.test(lower)) {
+    const eraCalendarSucesso = /(✅|📅).*(agendad|criad|movid|reagendad|cancelad)/i.test(ultimaMsgAssistant);
+    const perguntaSucesso = /\b(deu certo|funcionou|apareceu (no|na))\b/i.test(lower);
+    if (eraCalendarSucesso && perguntaSucesso) {
       const resp = '📅 Verifique seu Google Calendar agora — abra o app e veja se o evento apareceu. Se não apareceu, me diz exatamente o que você pediu para agendar que eu tento novamente.';
       await addMessage('user', message);
       await addMessage('assistant', resp);
@@ -330,7 +369,7 @@ async function think(message) {
     console.log(`=== BRAIN RECEBEU: "${message.substring(0, 50)}"`);
     let respostaCalendar = null;
     try {
-      respostaCalendar = await processarCalendar(message, await getHistory());
+      respostaCalendar = await processarCalendar(message, await getHistory(), chatId);
     } catch(e) {
       console.log('📅 [Calendar] Pulando calendar:', e.message);
     }
@@ -350,11 +389,50 @@ async function think(message) {
     const strategy = chooseStrategy(analysis);
     console.log(`🎯 [Brain] Estratégia: ${strategy.name}`);
 
+    // Passo 2.5: resolução de pessoas mencionadas (lookup, stub se nova, ambiguidade)
+    const pessoasInfo = { contextoStr: '', novas: [], ambiguos: [] };
+    if (analysis.nomes_mencionados?.length > 0 && !analysis.pessoas_pergunta_sobre) {
+      const nomesRecentes = getNomesRecentes(await getHistory(), 3);
+
+      for (const nome of analysis.nomes_mencionados) {
+        const matches = await buscarPessoaInteligente(nome);
+        if (matches.length === 0) {
+          await salvarOuAtualizarPessoa({
+            nome,
+            notas: `Mencionada em: "${message.substring(0, 100)}"`,
+          });
+          pessoasInfo.novas.push(nome);
+        } else if (matches.length > 1) {
+          const recente = matches.find(p =>
+            nomesRecentes.some(r => r.toLowerCase() === p.nome.toLowerCase())
+          );
+          if (!recente) pessoasInfo.ambiguos.push({ nome, opcoes: matches });
+          else {
+            pessoasInfo.preferidas = pessoasInfo.preferidas || {};
+            pessoasInfo.preferidas[nome.toLowerCase()] = recente;
+          }
+        }
+      }
+
+      // Short-circuit em ambiguidade não resolvida pelos últimos 3 turnos
+      if (pessoasInfo.ambiguos.length > 0) {
+        const a = pessoasInfo.ambiguos[0];
+        const opcoes = a.opcoes.map(p => `• ${p.nome} (${p.relacionamento || 'sem relação cadastrada'})`).join('\n');
+        const resp = `🤔 Qual <b>${a.nome}</b> você fala?\n\n${opcoes}\n\nMe diz pra eu não confundir.`;
+        await addMessage('user', message);
+        await addMessage('assistant', resp);
+        return resp;
+      }
+
+      pessoasInfo.contextoStr = await buildPessoasContextoMensagem(analysis.nomes_mencionados, pessoasInfo.preferidas || {});
+      console.log(`👥 [Brain] Pessoas: ${analysis.nomes_mencionados.length} mencionadas, ${pessoasInfo.novas.length} novas`);
+    }
+
     // Passo 3: carrega memória (Supabase + local)
     const memorySummary = await getMemorySummary();
 
     // Passo 4: gera resposta
-    const ariaResponse = await generateResponse(message, analysis, strategy, memorySummary);
+    const ariaResponse = await generateResponse(message, analysis, strategy, memorySummary, pessoasInfo);
 
     // Passo 5: salva na memória (Supabase + local)
     await addMessage('user', message);

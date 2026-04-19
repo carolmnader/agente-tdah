@@ -128,6 +128,32 @@ const buildPessoasContext = async () => {
   return ctx;
 };
 
+// ── Contexto contextual (apenas pessoas mencionadas na conversa atual) ──────
+
+const buildPessoasContextoMensagem = async (nomes, preferidas = {}) => {
+  if (!nomes?.length) return '';
+  const pessoas = [];
+  for (const nome of nomes) {
+    const pref = preferidas[nome.toLowerCase()];
+    if (pref) { pessoas.push(pref); continue; }
+    const matches = await buscarPessoaInteligente(nome);
+    if (matches.length > 0) pessoas.push(matches[0]);
+  }
+  if (!pessoas.length) return '';
+
+  let ctx = '\n━━━ PESSOAS NESTA CONVERSA ━━━\n';
+  pessoas.forEach(p => {
+    ctx += `• ${p.nome}`;
+    if (p.relacionamento) ctx += ` (${p.relacionamento})`;
+    if (p.notas) ctx += ` — ${p.notas.substring(0, 120)}`;
+    if (p.ultimo_contato) {
+      ctx += ` | última menção: ${new Date(p.ultimo_contato).toLocaleDateString('pt-BR')}`;
+    }
+    ctx += '\n';
+  });
+  return ctx;
+};
+
 // ── Resposta pós-evento ───────────────────────────────────────────────────────
 
 const gerarPerguntaPosEvento = async (nomeEvento) => {
@@ -155,5 +181,6 @@ const formatarPessoa = (p) => {
 module.exports = {
   salvarOuAtualizarPessoa, buscarPessoaInteligente, listarPessoas,
   buscarAniversariosProximos, extrairPessoasDaMensagem,
-  buildPessoasContext, gerarPerguntaPosEvento, formatarPessoa
+  buildPessoasContext, buildPessoasContextoMensagem,
+  gerarPerguntaPosEvento, formatarPessoa
 };

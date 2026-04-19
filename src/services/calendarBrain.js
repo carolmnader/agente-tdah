@@ -1,6 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, detectarCategoria } = require('../integrations/calendar');
-const { buscarMemoriaPorChave } = require('./memorySupabase');
+const { buscarMemoriaPorChave, salvarAcaoPendente, buscarAcaoPendente, limparAcaoPendente } = require('./memorySupabase');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -114,6 +114,109 @@ const buscarComSinonimos = async (termo, sinonimos = []) => {
   return [];
 };
 
+// ─── Guard de confirmação para ações destrutivas ───
+// Estado mora em Supabase (tabela acoes_pendentes) — sobrevive ao reciclo de instâncias serverless
+
+const formatarQuandoEvento = (ev) => {
+  try {
+    const inicio = ev.start?.dateTime || ev.start?.date;
+    if (!inicio) return '';
+    const d = new Date(inicio);
+    const dia = d.toLocaleDateString('pt-BR', { day: 'numeric', month: 'long' });
+    const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return ` em ${dia} às ${hora}`;
+  } catch (e) { return ''; }
+};
+
+const executarCriarLote = async (eventosLote) => {
+  const mem = global.ariaMemoria;
+  const criados = [], conflitos = [];
+
+  await Promise.all(eventosLote.map(async (ev) => {
+    try {
+      const tituloFinal = adicionarEmoji(ev.titulo || 'Evento');
+      const dh = resolverDataHora(ev.data, ev.hora);
+      const fim = new Date(dh.getTime() + (ev.duracao_minutos || 60) * 60000);
+      const { google } = require('googleapis');
+      const { getAuthClient } = require('../integrations/calendar');
+      const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
+      const existentes = await cal.events.list({
+        calendarId: 'primary',
+        timeMin: dh.toISOString(), timeMax: fim.toISOString(), singleEvents: true,
+      });
+      const ocupados = (existentes.data.items || []).filter(e => !e.summary?.includes('Buffer') && !e.summary?.includes('🌿'));
+      const evCal = ev.calendario || categorizarEvento(tituloFinal);
+      if (ocupados.length > 0) {
+        conflitos.push({ novo: { ...ev, titulo: tituloFinal, calendario: evCal }, existente: ocupados[0].summary });
+      } else {
+        await criarEvento(tituloFinal, dh, ev.duracao_minutos || 60, evCal);
+        criados.push({ ...ev, titulo: tituloFinal });
+      }
+    } catch (e) {
+      const tituloFinal = adicionarEmoji(ev.titulo || 'Evento');
+      const evCal = ev.calendario || categorizarEvento(tituloFinal);
+      const dh = resolverDataHora(ev.data, ev.hora);
+      await criarEvento(tituloFinal, dh, ev.duracao_minutos || 60, evCal);
+      criados.push({ ...ev, titulo: tituloFinal });
+    }
+  }));
+
+  let resp = '';
+  if (criados.length > 0) {
+    const dataRef = resolverDataHora(criados[0].data, criados[0].hora);
+    const diaFmt = dataRef.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+    resp += `📅 <b>${criados.length} evento(s) criados — ${diaFmt}:</b>\n\n`;
+    const ordenados = [...criados].sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
+    ordenados.forEach(ev => {
+      resp += `⏰ <b>${ev.hora}</b> — ${ev.titulo} (${ev.duracao_minutos || 60}min)\n`;
+    });
+    resp += `\n🌿 Buffers de 20min adicionados entre compromissos`;
+  }
+
+  if (conflitos.length > 0) {
+    mem.conflitosCalendarPendentes = conflitos;
+    resp += `\n\n⚠️ <b>${conflitos.length} conflito(s) detectado(s):</b>\n`;
+    conflitos.forEach(c => {
+      resp += `🔴 "${c.novo.titulo}" conflita com "<b>${c.existente}</b>"\n`;
+    });
+    resp += `\nO que prefere?\n▸ <b>"substitui"</b> — remove os antigos e cria os novos\n▸ <b>"pula os conflitos"</b> — mantém os já criados`;
+  }
+
+  return resp || '❌ Não consegui criar os eventos.';
+};
+
+const executarAcaoConfirmada = async (pendente) => {
+  const { tipo, params } = pendente;
+  try {
+    if (tipo === 'cancelar') {
+      return await cancelarEvento(params.evento_original);
+    }
+    if (tipo === 'reagendar') {
+      const novoHorario = `${params.nova_data || params.data || 'hoje'} às ${params.nova_hora || ''}`;
+      return await reagendarEvento(params.evento_original, novoHorario);
+    }
+    if (tipo === 'mudar_calendario') {
+      const { google } = require('googleapis');
+      const { getAuthClient, CATEGORIAS } = require('../integrations/calendar');
+      const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
+      const config = CATEGORIAS[params.novaCategoria] || CATEGORIAS['Trabalho'] || { cor: '9', emoji: '💼' };
+      await cal.events.patch({
+        calendarId: params.calOrigem,
+        eventId: params.eventId,
+        resource: { colorId: config.cor },
+      });
+      return `✅ <b>${params.summary}</b> agora está em ${config.emoji} <b>${params.novaCategoria}</b>`;
+    }
+    if (tipo === 'criar_lote') {
+      return await executarCriarLote(params.eventos);
+    }
+    return '❌ Ação pendente desconhecida.';
+  } catch (e) {
+    console.error('[CalendarBrain] Erro ao executar ação confirmada:', e.message);
+    return `❌ Deu erro ao executar: ${e.message}`;
+  }
+};
+
 const PROMPT_INTENT = `Você é o cérebro de agenda da ARIA, assistente pessoal da Carol com TDAH.
 
 CONTEXTO:
@@ -170,12 +273,27 @@ RETORNE APENAS JSON:
   "raciocinio": "explicação em 1 linha"
 }`;
 
-const processarCalendar = async (mensagem, historico = []) => {
+const processarCalendar = async (mensagem, historico = [], chatId = parseInt(process.env.TELEGRAM_CHAT_ID_CAROL || '0', 10)) => {
   try {
     const mem = global.ariaMemoria;
+    const msgL = mensagem.toLowerCase();
+
+    // Resolve ação pendente (sim/não) — persistida no Supabase, expira em 5 min
+    const pendente = await buscarAcaoPendente(chatId);
+    if (pendente) {
+      const pos = /^(sim|confirmo|pode|ok|beleza|vai|faz|manda|confirma|isso|uhum|claro|com certeza)\b/i;
+      const neg = /^(n[aã]o|cancela|deixa|esquece|para|pera|espera|melhor n[aã]o)\b/i;
+      if (pos.test(msgL)) {
+        await limparAcaoPendente(chatId);
+        return await executarAcaoConfirmada(pendente);
+      }
+      if (neg.test(msgL)) {
+        await limparAcaoPendente(chatId);
+        return '✋ Ok, não mexi em nada.';
+      }
+    }
 
     // Resolve conflitos pendentes
-    const msgL = mensagem.toLowerCase();
     if (mem.conflitosCalendarPendentes?.length > 0) {
       if (/substitui|sim|pode|cancela os|remove os|troca/.test(msgL)) {
         const conflitos = mem.conflitosCalendarPendentes;
@@ -261,111 +379,77 @@ const processarCalendar = async (mensagem, historico = []) => {
 
     // CRIAR LOTE
     if (intent.acao === 'criar_lote' && intent.eventos?.length > 0) {
-      const criados = [], conflitos = [];
-
-      await Promise.all(intent.eventos.map(async (ev) => {
-        try {
-          const tituloFinal = adicionarEmoji(ev.titulo || 'Evento');
-          const dh = resolverDataHora(ev.data, ev.hora);
-          const fim = new Date(dh.getTime() + (ev.duracao_minutos || 60) * 60000);
-
-          // Checa conflito
-          const { google } = require('googleapis');
-          const { getAuthClient } = require('../integrations/calendar');
-          const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
-          const existentes = await cal.events.list({
-            calendarId: 'primary',
-            timeMin: dh.toISOString(), timeMax: fim.toISOString(), singleEvents: true,
-          });
-          const ocupados = (existentes.data.items || []).filter(e => !e.summary?.includes('Buffer') && !e.summary?.includes('🌿'));
-
-          const evCal = ev.calendario || categorizarEvento(tituloFinal);
-          if (ocupados.length > 0) {
-            conflitos.push({ novo: {...ev, titulo: tituloFinal, calendario: evCal}, existente: ocupados[0].summary });
-          } else {
-            await criarEvento(tituloFinal, dh, ev.duracao_minutos || 60, evCal);
-            criados.push({...ev, titulo: tituloFinal});
-          }
-        } catch(e) {
-          const tituloFinal = adicionarEmoji(ev.titulo || 'Evento');
-          const evCal = ev.calendario || categorizarEvento(tituloFinal);
-          const dh = resolverDataHora(ev.data, ev.hora);
-          await criarEvento(tituloFinal, dh, ev.duracao_minutos || 60, evCal);
-          criados.push({...ev, titulo: tituloFinal});
-        }
-      }));
-
-      let resp = '';
-      if (criados.length > 0) {
-        const dataRef = resolverDataHora(criados[0].data, criados[0].hora);
-        const diaFmt = dataRef.toLocaleDateString('pt-BR', {weekday:'long',day:'numeric',month:'long'});
-        resp += `📅 <b>${criados.length} evento(s) criados — ${diaFmt}:</b>\n\n`;
-        const ordenados = [...criados].sort((a,b) => (a.hora || '').localeCompare(b.hora || ''));
+      // 2+ eventos: pede confirmação antes de criar
+      if (intent.eventos.length >= 2) {
+        const dataRef = resolverDataHora(intent.eventos[0].data, intent.eventos[0].hora);
+        const diaFmt = dataRef.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+        let resp = `📅 <b>Vou criar ${intent.eventos.length} eventos — ${diaFmt}:</b>\n\n`;
+        const ordenados = [...intent.eventos]
+          .map(ev => ({ ...ev, _titulo: adicionarEmoji(ev.titulo || 'Evento') }))
+          .sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
         ordenados.forEach(ev => {
-          resp += `⏰ <b>${ev.hora}</b> — ${ev.titulo} (${ev.duracao_minutos || 60}min)\n`;
+          resp += `⏰ <b>${ev.hora}</b> — ${ev._titulo} (${ev.duracao_minutos || 60}min)\n`;
         });
-        resp += `\n🌿 Buffers de 20min adicionados entre compromissos`;
-      }
-
-      if (conflitos.length > 0) {
-        mem.conflitosCalendarPendentes = conflitos;
-        resp += `\n\n⚠️ <b>${conflitos.length} conflito(s) detectado(s):</b>\n`;
-        conflitos.forEach(c => {
-          resp += `🔴 "${c.novo.titulo}" conflita com "<b>${c.existente}</b>"\n`;
+        resp += `\n<b>Confirma?</b> Responda "sim" ou "não".`;
+        await salvarAcaoPendente(chatId, {
+          tipo: 'criar_lote',
+          params: { eventos: intent.eventos },
         });
-        resp += `\nO que prefere?\n▸ <b>"substitui"</b> — remove os antigos e cria os novos\n▸ <b>"pula os conflitos"</b> — mantém os já criados`;
+        return resp;
       }
-
-      return resp || '❌ Não consegui criar os eventos.';
+      // 1 evento só em lote: cria direto
+      return await executarCriarLote(intent.eventos);
     }
 
-    // REAGENDAR
+    // REAGENDAR — pede confirmação
     if (intent.acao === 'reagendar') {
       if (!intent.evento_original) return '📅 Qual evento quer reagendar?';
       const eventos = await buscarComSinonimos(intent.evento_original, intent.sinonimos_busca || []);
       if (!eventos.length) return `❌ Não encontrei "<b>${intent.evento_original}</b>". Como está salvo na agenda?`;
-      const novoHorario = `${intent.nova_data || intent.data || 'hoje'} às ${intent.nova_hora || ''}`;
-      return await reagendarEvento(intent.evento_original, novoHorario);
+      const ev = eventos[0];
+      const quandoAtual = formatarQuandoEvento(ev);
+      const novoQuando = `${intent.nova_data || intent.data || 'hoje'}${intent.nova_hora ? ' às ' + intent.nova_hora : ''}`;
+      await salvarAcaoPendente(chatId, {
+        tipo: 'reagendar',
+        params: {
+          evento_original: intent.evento_original,
+          nova_data: intent.nova_data,
+          data: intent.data,
+          nova_hora: intent.nova_hora,
+        },
+      });
+      return `🔄 <b>Confirma mover "${ev.summary}"${quandoAtual ? ' de' + quandoAtual : ''} para ${novoQuando}?</b>\nResponda "sim" ou "não".`;
     }
 
-    // CANCELAR
+    // CANCELAR — pede confirmação
     if (intent.acao === 'cancelar') {
       if (!intent.evento_original) return '🗑️ Qual evento quer cancelar?';
       const eventos = await buscarComSinonimos(intent.evento_original, intent.sinonimos_busca || []);
       if (!eventos.length) return `❌ Não encontrei "<b>${intent.evento_original}</b>".`;
-      return await cancelarEvento(intent.evento_original);
+      const ev = eventos[0];
+      const quando = formatarQuandoEvento(ev);
+      await salvarAcaoPendente(chatId, {
+        tipo: 'cancelar',
+        params: { evento_original: intent.evento_original },
+      });
+      return `🗑️ <b>Confirma cancelar "${ev.summary}"${quando}?</b>\nResponda "sim" ou "não".`;
     }
 
-    // MUDAR CALENDÁRIO — patch colorId sem mover horário
+    // MUDAR CALENDÁRIO — pede confirmação
     if (intent.acao === 'mudar_calendario') {
       if (!intent.evento_original) return '📅 Qual evento quer mover de calendário?';
-
       const eventos = await buscarComSinonimos(intent.evento_original, intent.sinonimos_busca || []);
       if (!eventos.length) return `❌ Não encontrei "<b>${intent.evento_original}</b>".`;
-
       const ev = eventos[0];
       const { CATEGORIAS } = require('../integrations/calendar');
       const novaCategoria = intent.calendario || 'Trabalho';
       const config = CATEGORIAS[novaCategoria] || CATEGORIAS['Trabalho'] || { cor: '9', emoji: '💼' };
-
-      try {
-        const { google } = require('googleapis');
-        const { getAuthClient } = require('../integrations/calendar');
-        const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
-
-        const calOrigem = ev._calendarId || ev.organizer?.email || 'primary';
-
-        await cal.events.patch({
-          calendarId: calOrigem,
-          eventId: ev.id,
-          resource: { colorId: config.cor },
-        });
-
-        return `✅ <b>${ev.summary}</b> agora está em ${config.emoji} <b>${novaCategoria}</b>`;
-      } catch(e) {
-        console.error('[CalendarBrain] Erro ao mudar categoria:', e.message);
-        return `❌ Erro ao mudar categoria: ${e.message}`;
-      }
+      const calOrigem = ev._calendarId || ev.organizer?.email || 'primary';
+      await salvarAcaoPendente(chatId, {
+        tipo: 'mudar_calendario',
+        params: { eventId: ev.id, summary: ev.summary, calOrigem, novaCategoria },
+      });
+      return `🎨 <b>Confirma mover "${ev.summary}" para o calendário ${config.emoji} ${novaCategoria}?</b>\nResponda "sim" ou "não".`;
     }
 
     // REORGANIZAR

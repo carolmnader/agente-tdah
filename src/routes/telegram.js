@@ -37,7 +37,7 @@ router.post("/telegram", async (req, res) => {
 
         await sendTelegramMessage(chatId, `📝 <b>Ouvi:</b> <i>"${transcricao}"</i>`);
 
-        const reply = await think(transcricao);
+        const reply = await think(transcricao, chatId);
         await enviarMensagemLonga(chatId, reply);
       } catch(e) {
         console.error('🎤 [Telegram] Erro áudio:', e.message);
@@ -48,7 +48,7 @@ router.post("/telegram", async (req, res) => {
 
     // Texto simples
     if (message.text) {
-      const reply = await think(message.text);
+      const reply = await think(message.text, chatId);
       await enviarMensagemLonga(chatId, reply);
       return res.sendStatus(200);
     }
@@ -95,7 +95,7 @@ router.post("/telegram", async (req, res) => {
           if (result.wasTruncated) {
             prompt += `\n\n[NOTA: PDF tinha ${result.originalLength} caracteres, truncado para 80.000]`;
           }
-          const reply = await think(prompt);
+          const reply = await think(prompt, chatId);
           console.log(`📄 [Telegram] PDF grande processado via extração de texto`);
           await enviarMensagemLonga(chatId, reply);
         }
@@ -104,7 +104,7 @@ router.post("/telegram", async (req, res) => {
         const text = extractTextFromBuffer(buffer, fileName);
         if (text) {
           const prompt = `${caption}\n\n--- CONTEÚDO DO ARQUIVO ${fileName} ---\n${text.substring(0, 4000)}`;
-          const reply = await think(prompt);
+          const reply = await think(prompt, chatId);
           await enviarMensagemLonga(chatId, reply);
         } else {
           console.log(`📄 [Telegram] Formato não suportado para leitura de texto`);
