@@ -1,3 +1,7 @@
+// Força TZ BRT: Vercel roda em UTC por default e não permite TZ como env var reservado.
+// Setar process.env.TZ antes de qualquer Date/require garante que new Date() e
+// Date.prototype.setHours interpretem horários em America/Sao_Paulo.
+process.env.TZ = 'America/Sao_Paulo';
 require("dotenv").config();
 const express = require("express");
 const axios = require("axios");

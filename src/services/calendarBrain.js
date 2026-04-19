@@ -504,4 +504,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar, dicaIntent };
+module.exports = { processarCalendar, dicaIntent, resolverDataHora };

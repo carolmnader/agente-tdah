@@ -12,7 +12,7 @@ const getAuthClient = () => {
 
 const getCalendar = () => google.calendar({ version: 'v3', auth: getAuthClient() });
 
-const TIMEZONE = 'America/Bahia';
+const TIMEZONE = 'America/Sao_Paulo';
 
 // Mapa completo: ID → { nome, emoji }
 const CALENDARIOS = {
