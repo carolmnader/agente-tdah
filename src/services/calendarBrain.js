@@ -58,6 +58,23 @@ const categorizarEvento = (titulo) => {
   return 'Trabalho';
 };
 
+// ─── Pré-classificador de intenção (Bug #1: categoria × horário) ───
+// Detecta padrões óbvios em JS antes de chamar Opus, dá hint pra desambiguar
+// reagendar (destino=horário) vs mudar_calendario (destino=nome de calendário).
+const NOMES_CALENDARIOS = ['Saúde','Saude','Trabalho','Selfcare','Eventos','Lazer','Estudo','Faculdade','Burocracia','Lar/Pets','Lar','Pets'];
+const REGEX_NOME_CALENDARIO = new RegExp(`\\b(${NOMES_CALENDARIOS.map(n => n.replace(/\//g, '\\/?')).join('|')})\\b`, 'i');
+const REGEX_HORARIO_TEXTO = /\b(\d{1,2}[:h]\d{0,2}|\d{1,2}\s*h(oras?)?|meio[-\s]?dia|meia[-\s]?noite)\b/i;
+const REGEX_VERBO_MUDANCA = /\b(muda|mudar|passa|passar|move|mover|joga|jogar|coloca|colocar|p[oõ]e|p[oõ]r|categoriza|recategoriza)\b/i;
+
+function dicaIntent(msg) {
+  if (!msg || !REGEX_VERBO_MUDANCA.test(msg)) return null;
+  const temCalendario = REGEX_NOME_CALENDARIO.test(msg);
+  const temHorario = REGEX_HORARIO_TEXTO.test(msg);
+  if (temCalendario && !temHorario) return 'mudar_calendario';
+  if (temHorario && !temCalendario) return 'reagendar';
+  return null; // ambíguo (ambos ou nenhum) — deixa Opus decidir
+}
+
 const resolverDataHora = (data, hora) => {
   const agora = new Date();
   const resultado = new Date(agora);
@@ -224,6 +241,7 @@ CONTEXTO:
 - Agenda de hoje: {AGENDA_HOJE}
 - Histórico recente: {HISTORICO}
 - Apelidos desta sessão: {APELIDOS}
+- Dica do pré-classificador (regex JS): {DICA_INTENT}
 
 MENSAGEM DA CAROL: {MENSAGEM}
 
@@ -255,6 +273,23 @@ EXEMPLOS DE MUDAR CALENDÁRIO:
 - "muda categoria para Saúde" → acao: mudar_calendario, calendario: "Saúde", evento_original: último evento mencionado
 - "coloca no Trabalho" → acao: mudar_calendario, calendario: "Trabalho"
 - "psicólogo às 14h" → acao: criar, calendario: "Saúde", hora: "14:00" (NÃO é mudar_calendario)
+
+DESAMBIGUAÇÃO REAGENDAR vs MUDAR_CALENDARIO (CRÍTICO — Bug #1):
+- Destino é HORÁRIO (HH:MM, "15h", "meio-dia") → reagendar
+- Destino é CALENDÁRIO (Saúde/Trabalho/Selfcare/Eventos/Lazer/Estudo/Faculdade/Burocracia/Lar/Pets) → mudar_calendario
+- Se mencionar AMBOS na mesma frase: prefira reagendar (Carol pode mudar a cor depois).
+- A regra 8 (LINGUAGEM INFORMAL) lista "move" como reagendar — isso vale APENAS quando o destino é horário. Se o destino é um nome de calendário, sempre mudar_calendario.
+
+EXEMPLOS DE DESAMBIGUAÇÃO:
+- "muda almoço pra 13h" → reagendar (13h é hora)
+- "muda almoço pra Saúde" → mudar_calendario (Saúde é calendário)
+- "passa o almoço de 12h pra 13h" → reagendar
+- "passa o almoço de Trabalho pra Saúde" → mudar_calendario
+- "move o psicólogo pra Selfcare" → mudar_calendario (NÃO reagendar, mesmo com "move")
+- "puxa o almoço pra 13h" → reagendar
+- "joga o almoço pra Saúde" → mudar_calendario
+
+ATENÇÃO: se a "Dica do pré-classificador" do CONTEXTO indicar uma ação ('reagendar' ou 'mudar_calendario'), prefira ela — só desvie se a mensagem da Carol contradiz claramente.
 
 RETORNE APENAS JSON:
 {
@@ -328,6 +363,8 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       .map(m => `${m.role === 'user' ? 'Carol' : 'ARIA'}: ${m.content?.substring(0, 120)}`)
       .join('\n');
 
+    const dica = dicaIntent(mensagem);
+
     const prompt = PROMPT_INTENT
       .replace('{HORA_ATUAL}', agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}))
       .replace('{DIA_SEMANA}', diasSemana[agora.getDay()])
@@ -335,6 +372,7 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       .replace('{AGENDA_HOJE}', agendaHoje || 'vazia')
       .replace('{HISTORICO}', historicoTexto || 'início da conversa')
       .replace('{APELIDOS}', JSON.stringify(mem.apelidos))
+      .replace('{DICA_INTENT}', dica || 'nenhuma')
       .replace('{MENSAGEM}', mensagem);
 
     const respIA = await anthropic.messages.create({
@@ -466,4 +504,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar };
+module.exports = { processarCalendar, dicaIntent };
