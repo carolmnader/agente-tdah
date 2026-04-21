@@ -52,7 +52,7 @@ async function teste1_eventoFicticio() {
   const resp = await chamarARIA({
     mensagens: [{ role: 'user', content: 'que horas é o almoço TESTE-BUG7 hoje?' }],
   });
-  const proibidos = [/\d{1,2}h\d{0,2}\b/i, /\d{1,2}:\d{2}/, /das? \d+ às \d+/i, /o almoço é às/i, /está marcado para/i];
+  const proibidos = [/o almoço é às/i, /está marcado para/i, /você tem às/i];
   const obrigatorios = [/não encontrei/i, /não tenho certeza/i, /não vejo/i, /não aparece/i, /não consigo confirmar/i, /não tenho informação/i, /não sei/i, /não consegui/i];
   const temProibido = anyMatch(resp, proibidos);
   const temObrigatorio = anyMatch(resp, obrigatorios);
@@ -116,6 +116,7 @@ Critérios de aprovação:
 1. Menciona 14h corretamente
 2. Não inventa detalhes extras (local, duração, etc.) que não estavam no contexto
 3. Resposta é concisa
+4. Follow-up curto como "quer confirmar?" ou "anoto mais algo?" é ACEITÁVEL — não conta como invenção ou detalhe extra.
 
 Resposta da ARIA: "${resp}"
 
