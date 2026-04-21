@@ -18,6 +18,18 @@ const TIMEZONE = 'America/Sao_Paulo';
 // Evita "lixo eterno" no Calendar — Carol revisita trimestralmente.
 const CAP_PADRAO_RECORRENCIA = { daily: 90, weekly: 26, monthly: 12 };
 
+// Normaliza strings para match robusto (Bug #7): strip acentos + emojis + lowercase.
+// Usado no fallback de buscarEvento quando Google search index tem lag de indexação.
+function normalizarBusca(str) {
+  if (!str) return '';
+  return str
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')                    // strip acentos
+    .replace(/[\p{Extended_Pictographic}\uFE00-\uFE0F\u200D]/gu, '')     // strip emojis + modifiers
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
 function construirRRULE({ frequencia, dias_semana = null, ate_data = null, contagem = null, intervalo = 1 }) {
   if (!CAP_PADRAO_RECORRENCIA[frequencia]) {
     throw new Error(`frequencia inválida: ${frequencia} (esperado daily|weekly|monthly)`);
@@ -330,12 +342,16 @@ const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categori
 };
 
 // 4. BUSCAR EVENTO POR NOME — em todos os calendários
+// Bug #7: 2 caminhos. Primeiro tenta events.list com `q` (rápido quando Google já indexou).
+// Se vazio, fallback lista TODOS eventos da janela + match client-side normalizado
+// (resolve race do índice Google, acentos e emojis).
 const buscarEvento = async (termo) => {
   try {
     const cal = getCalendar();
     const agora = new Date();
     const daqui30 = new Date(agora); daqui30.setDate(agora.getDate() + 30);
 
+    // Tentativa 1: q-path (delega match ao índice full-text do Google)
     const promises = CALENDAR_IDS.map(async (calId) => {
       try {
         const res = await cal.events.list({
@@ -348,9 +364,19 @@ const buscarEvento = async (termo) => {
           .map(e => ({ ...e, _calendarId: calId }));
       } catch { return []; }
     });
+    const hits = (await Promise.all(promises)).flat();
+    if (hits.length > 0) {
+      console.log(`🔍 [buscarEvento] q-path hit: ${hits.length}`);
+      return hits;
+    }
 
-    const resultados = await Promise.all(promises);
-    return resultados.flat();
+    // Fallback: events.list sem q + match client-side normalizado.
+    const termoNorm = normalizarBusca(termo);
+    if (!termoNorm) return [];
+    const todos = await buscarEventosTodos(agora, daqui30);
+    const matches = todos.filter(ev => normalizarBusca(ev.summary || '').includes(termoNorm));
+    console.log(`🔍 [buscarEvento] fallback-path hit: ${matches.length}`);
+    return matches;
   } catch(e) { return []; }
 };
 
@@ -455,4 +481,4 @@ const proximoHorarioLivre = async (duracaoMinutos = 60) => {
   } catch(e) { return `❌ Erro: ${e.message}`; }
 };
 
-module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA };
+module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA, normalizarBusca };
