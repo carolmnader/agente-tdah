@@ -122,12 +122,12 @@ async function aplicarDecaimentoGlobal() {
   return atualizadas;
 }
 
-async function hipotesesParaPrompt(maxN = 8) {
+async function hipotesesParaPrompt(maxN = 8, minConfianca = 0.6) {
   const { data, error } = await supabase
     .from('hipoteses')
     .select('texto, confianca')
     .in('status', ['proposta', 'validada'])
-    .gte('confianca', 0.6)
+    .gte('confianca', minConfianca)
     .order('confianca', { ascending: false })
     .limit(maxN);
   if (error) throw new Error(`hipotesesParaPrompt: ${error.message}`);

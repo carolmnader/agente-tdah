@@ -9,6 +9,9 @@ const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holis
 const { processarCalendar } = require('./calendarBrain');
 const { buscarPessoaInteligente, formatarPessoa, salvarOuAtualizarPessoa, buildPessoasContextoMensagem } = require('./crm');
 const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
+const { hipotesesParaPrompt } = require('./hipoteses');
+const { detectarEPropor } = require('../prompts/detectorPadroes');
+const { validarImplicitamente } = require('./validadorImplicito');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -220,7 +223,13 @@ Meta 2026: ${meta}`;
     ? `\n━━━ PESSOAS NOVAS DETECTADAS ━━━\nPessoas que Carol mencionou e ainda não conheço: ${pessoasInfo.novas.join(', ')}.\nTermine sua resposta com UMA linha curta perguntando quem é (ex: "💭 Quem é ${pessoasInfo.novas[0]}? Curiosa!").\nNão interrompa o fluxo principal — a pergunta vem DEPOIS da resposta normal.`
     : '';
 
-  const systemWithMemory = `${SYSTEM_PROMPT}
+  // Memória Evolutiva Fase 2 — injeta hipóteses validadas (>=0.6 confianca) no prompt
+  const hipotesesAtivas = await hipotesesParaPrompt(8).catch(() => []);
+  const blocoHipoteses = hipotesesAtivas.length > 0
+    ? `\n━━━ O QUE VOCÊ APRENDEU SOBRE CAROL ━━━\n${hipotesesAtivas.map(h => `- ${h.texto} (confiança: ${parseFloat(h.confianca).toFixed(2)})`).join('\n')}\n\nUse essas hipóteses pra contextualizar, não repeti-las de volta. Não invente novas aqui.`
+    : '';
+
+  const systemWithMemory = `${SYSTEM_PROMPT}${blocoHipoteses}
 ${profileContext}
 ${holisticContext}
 
@@ -455,6 +464,10 @@ async function think(message, chatId = null) {
 
     // Passo 8: extrai fatos automaticamente (fire-and-forget)
     extrairEsalvarFatos(message, ariaResponse).catch(e => console.log('🧠 Extração async:', e.message));
+
+    // Passo 8.5: memória evolutiva — detector reativo + validador implícito (fire-and-forget)
+    detectarEPropor(message, ariaResponse, history).catch(e => console.log('🧠 Detector:', e.message));
+    validarImplicitamente(message, ariaResponse).catch(e => console.log('🧠 Validador:', e.message));
 
     // Passo 9: analytics (fire-and-forget)
     registrarEvento('mensagem', { humor: detectarHumor(message), categoria: analysis.intent }).catch(() => {});
