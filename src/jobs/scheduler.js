@@ -32,6 +32,7 @@ FONTES (CRÍTICO — não inventar):
 - CONTEXTUAIS (pano de fundo, NÃO são agenda): memorias_relevantes, hipoteses_ativas. Use como observação ou cor, nunca como compromisso de hoje.
 - aprendizados_recentes: hipóteses recém-validadas sobre a Carol. Se o array tiver itens, INCLUA no briefing UM bloco destacado com marcador 🧠, no formato exato: "🧠 Algo que aprendi com certeza sobre você: [texto da hipótese de maior confiança]". Use só o primeiro item do array. Máximo 1 bloco por briefing. Se o array estiver vazio, não mencione nada.
 - Tipo "checkin_tarde": é check-in de meio do dia, hora específica no contexto. Tom Registro A (seca-poética) ou C (editorial-observadora), NUNCA maternal. Se há eventos_passados, pergunte factualmente sobre eles ("você tinha X, como foi?"). Se tarefas_pendentes tem itens, mencione uma específica sem cobrar. Se evento_proximo_30min não for null, seja breve (vai interromper). Se tudo vazio, só marque o momento ("tarde começando") sem forçar conversa.
+- micropratica_sugerida: se não for null, INCLUA no final da mensagem um bloco marcado com 🌱 no formato exato: "🌱 <b>{nome}</b>\n{descricao}\n<i>{duracao_min} min · {fonte}</i>". Use literalmente os campos do objeto — não reescreva, não invente variações, não adicione sua opinião sobre a prática. Se for null, NÃO invente prática nenhuma. NUNCA gere conselho de saúde que não esteja nesta chave.
 - Se agenda_do_dia estiver vazia ou ausente, diga literalmente "agenda livre hoje" ou similar. NÃO mencione exercício, estudo, reunião ou outros compromissos a menos que estejam em agenda_do_dia.
 
 Regras desta mensagem:
@@ -141,6 +142,19 @@ const jobCheckinTarde = async (hora) => {
       ? (humor3d.split('\n').filter(l => l.startsWith(hojeISO)).join('\n') || null)
       : null;
 
+    // Sugerir micro-prática em ~50% dos casos (seed estável por hora+dia)
+    const seed = agora.getHours() + agora.getDate();
+    let microsugestao = null;
+    if (seed % 2 === 0) {
+      const { sugerirMicropratica } = require('../services/micropraticas');
+      const ayurvedaCtx = getContextoAyurveda();
+      microsugestao = sugerirMicropratica({
+        hora,
+        dosha: ayurvedaCtx?.bloco?.dosha || null,
+        humor: humorHoje,
+      });
+    }
+
     const msg = await gerarMensagemProativa({
       tipo: 'checkin_tarde',
       dados: {
@@ -149,6 +163,7 @@ const jobCheckinTarde = async (hora) => {
         tarefas_pendentes: tarefas.slice(0, 3).map(t => t.titulo),
         humor_hoje: humorHoje,
         evento_proximo_30min: eventoProximo30min,
+        micropratica_sugerida: microsugestao,
       }
     });
     await enviarMensagemLonga(CAROL_CHAT_ID, msg);
