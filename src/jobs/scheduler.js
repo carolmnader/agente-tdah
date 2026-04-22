@@ -252,6 +252,8 @@ const iniciarScheduler = () => {
           msg = `🎂 <b>Hoje é aniversário de ${p.nome}!</b>\n\nQuer enviar uma mensagem? 💙`;
         } else if (diff === 1) {
           msg = `🎂 <b>Amanhã é aniversário de ${p.nome}!</b>\n\nQuer que eu te lembre de parabenizar? 💙`;
+        } else if (diff === 2) {
+          msg = `🎂 <b>Em 2 dias é aniversário de ${p.nome}!</b>\n\nQuer que eu te lembre de parabenizar? 💙`;
         }
 
         if (msg) await sendTelegramMessage(CAROL_CHAT_ID, msg);
