@@ -9,7 +9,7 @@ const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holis
 const { processarCalendar } = require('./calendarBrain');
 const { buscarPessoaInteligente, formatarPessoa, salvarOuAtualizarPessoa, buildPessoasContextoMensagem } = require('./crm');
 const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
-const { hipotesesParaPrompt } = require('./hipoteses');
+const { hipotesesParaPrompt, listarHipotesesValidadas } = require('./hipoteses');
 const { listarSugestoesAbertas } = require('./sugestoes');
 const { detectarEPropor } = require('../prompts/detectorPadroes');
 const { validarImplicitamente } = require('./validadorImplicito');
@@ -359,6 +359,38 @@ async function think(message, chatId = null) {
         ).join('\n\n');
         resp = `🔧 <b>${sugs.length} sugestão(ões) aberta(s):</b>\n\n${itens}\n\n<i>Aceitar/rejeitar: no Supabase Studio (ainda).</i>`;
       }
+      await addMessage('user', message);
+      await addMessage('assistant', resp);
+      return resp;
+    }
+
+    // Passo 0d: /aprendizados — lista hipóteses validadas
+    if (/^\/?aprendizados?$/i.test(lower)) {
+      const aps = await listarHipotesesValidadas(10);
+      let resp;
+      if (!aps.length) {
+        resp = '🧠 Ainda não tenho nada validado com segurança sobre você. Quando eu tiver, aparece aqui.';
+      } else {
+        const itens = aps.map((h, i) =>
+          `<b>${i + 1}.</b> ${h.texto}\n<i>conf ${Number(h.confianca).toFixed(2)}</i>`
+        ).join('\n\n');
+        resp = `🧠 <b>${aps.length} coisa(s) que aprendi sobre você:</b>\n\n${itens}`;
+      }
+      await addMessage('user', message);
+      await addMessage('assistant', resp);
+      return resp;
+    }
+
+    // Passo 0e: /ajuda — lista comandos disponíveis
+    if (/^\/?(ajuda|help)$/i.test(lower)) {
+      const resp = `🗂️ <b>Comandos disponíveis:</b>
+
+<b>/sugestoes</b> — o que eu proponho melhorar em mim mesma
+<b>/aprendizados</b> — o que aprendi sobre você com segurança
+<b>/checkin</b> ou <b>bom dia</b> — check-in 4D (corpo, mente, emoção, energia)
+<b>/relatorio</b> — análise de padrões TDAH da semana
+
+Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
       await addMessage('user', message);
       await addMessage('assistant', resp);
       return resp;

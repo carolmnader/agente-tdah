@@ -134,6 +134,18 @@ async function hipotesesParaPrompt(maxN = 8, minConfianca = 0.6) {
   return data || [];
 }
 
+async function listarHipotesesValidadas(limite = 10) {
+  const { data, error } = await supabase
+    .from('hipoteses')
+    .select('id, texto, confianca, tags, notificado_em')
+    .eq('status', 'validada')
+    .order('confianca', { ascending: false })
+    .order('notificado_em', { ascending: false, nullsFirst: false })
+    .limit(limite);
+  if (error) throw new Error(`listarHipotesesValidadas: ${error.message}`);
+  return data || [];
+}
+
 async function buscarAprendizadosNaoNotificados(limite = 3) {
   const { data, error } = await supabase
     .from('hipoteses')
@@ -201,6 +213,7 @@ module.exports = {
   recalcularConfianca,
   aplicarDecaimentoGlobal,
   hipotesesParaPrompt,
+  listarHipotesesValidadas,
   buscarAprendizadosNaoNotificados,
   marcarComoNotificadas,
   buscarHipotesesRelevantes,
