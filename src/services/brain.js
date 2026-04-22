@@ -10,6 +10,7 @@ const { processarCalendar } = require('./calendarBrain');
 const { buscarPessoaInteligente, formatarPessoa, salvarOuAtualizarPessoa, buildPessoasContextoMensagem } = require('./crm');
 const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
 const { hipotesesParaPrompt } = require('./hipoteses');
+const { listarSugestoesAbertas } = require('./sugestoes');
 const { detectarEPropor } = require('../prompts/detectorPadroes');
 const { validarImplicitamente } = require('./validadorImplicito');
 
@@ -344,6 +345,23 @@ async function think(message, chatId = null) {
       } catch(e) {
         console.log('📊 [Analytics] Erro relatório:', e.message);
       }
+    }
+
+    // Passo 0c: /sugestoes — lista sugestões arquiteturais abertas (sem Opus)
+    if (/^\/?sugest[oõ]es?$/i.test(lower)) {
+      const sugs = await listarSugestoesAbertas(5);
+      let resp;
+      if (!sugs.length) {
+        resp = '🔧 Nenhuma sugestão arquitetural aberta no momento. Quando eu gerar algo novo à noite, vai aparecer aqui.';
+      } else {
+        const itens = sugs.map((s, i) =>
+          `<b>${i + 1}. ${s.titulo}</b>\n<i>${s.categoria} · P${s.prioridade} · conf ${Number(s.confianca).toFixed(2)}</i>\n${s.descricao}`
+        ).join('\n\n');
+        resp = `🔧 <b>${sugs.length} sugestão(ões) aberta(s):</b>\n\n${itens}\n\n<i>Aceitar/rejeitar: no Supabase Studio (ainda).</i>`;
+      }
+      await addMessage('user', message);
+      await addMessage('assistant', resp);
+      return resp;
     }
 
     // Passo 0b3: emergência → protocolo 3 passos direto (ANTES do Calendar para não gastar tokens)
