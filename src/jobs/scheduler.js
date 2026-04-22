@@ -1,3 +1,5 @@
+// BACKLOG Bug #16: 7 crons existentes usam 'America/Bahia', novo cron noturno
+// usa 'America/Sao_Paulo' (pós-Bug #5). Alinhar todos pra Sao_Paulo em sessão futura.
 const cron = require('node-cron');
 const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient } = require('../integrations/calendar');
 const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria } = require('../services/memorySupabase');
@@ -6,6 +8,8 @@ const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = re
 const { getCheckinMatinal } = require('../modules/holistic');
 const { buscarAniversariosProximos } = require('../services/crm');
 const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/analytics');
+const { aplicarDecaimentoGlobal, proporHipotese } = require('../services/hipoteses');
+const { analisarNoturno } = require('../services/analiseNoturna');
 const Anthropic = require('@anthropic-ai/sdk');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -266,6 +270,25 @@ const iniciarScheduler = () => {
     }
   }, { timezone: 'America/Bahia' });
 
+  // Memória evolutiva — análise noturna todo dia às 2h (não notifica Carol, só registra hipóteses)
+  cron.schedule('0 2 * * *', async () => {
+    console.log('🌙 [Cron noturno] Iniciando análise...');
+    try {
+      const decaimento = await aplicarDecaimentoGlobal();
+      console.log(`🌙 Decaimento aplicado em ${decaimento} hipóteses`);
+      const resultado = await analisarNoturno();
+      console.log(`🌙 Análise gerou ${resultado.hipoteses_novas.length} hipóteses novas`);
+      for (const h of resultado.hipoteses_novas) {
+        await proporHipotese({
+          texto: h.texto, fonte: 'cron_noturno',
+          tags: h.tags || [], contexto: 'analise_noturna_02h',
+        });
+      }
+    } catch (e) {
+      console.error('🌙 [Cron noturno] Erro:', e.message);
+    }
+  }, { timezone: 'America/Sao_Paulo' });
+
   console.log('[Scheduler] ✅ Jobs ativos:');
   console.log('  🌅 Briefing matinal: todo dia às 7h');
   console.log('  🎂 Aniversários: todo dia às 8h');
@@ -274,6 +297,7 @@ const iniciarScheduler = () => {
   console.log('  📅 Planejamento semanal: domingo às 18h');
   console.log('  🌙 Resumo noturno: todo dia às 22h');
   console.log('  📈 Relatório mensal: dia 1 às 9h');
+  console.log('  🌙 Análise evolutiva (memória): todo dia às 2h');
 };
 
 module.exports = { iniciarScheduler, jobBriefingMatinal, jobResumoNoturno, jobPlanejamentoSemanal };
