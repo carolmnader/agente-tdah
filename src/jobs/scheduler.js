@@ -11,6 +11,7 @@ const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/ana
 const { aplicarDecaimentoGlobal, proporHipotese } = require('../services/hipoteses');
 const { analisarNoturno } = require('../services/analiseNoturna');
 const Anthropic = require('@anthropic-ai/sdk');
+const { SYSTEM_PROMPT } = require('../prompts/system');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -20,26 +21,23 @@ const CAROL_CHAT_ID = process.env.TELEGRAM_CHAT_ID_CAROL;
 // ─── GERADOR DE MENSAGEM PROATIVA ────────────────────────────────────────────
 
 const gerarMensagemProativa = async (contexto) => {
-  const resp = await anthropic.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 600,
-    messages: [{
-      role: 'user',
-      content: `Você é a ARIA, assistente pessoal da Carol com TDAH. Gere uma mensagem proativa no Telegram.
+  const userPrompt = `Você está enviando uma mensagem PROATIVA pra Carol no Telegram (não é resposta a pergunta dela).
 
 TIPO: ${contexto.tipo}
 CONTEXTO: ${JSON.stringify(contexto.dados)}
 
-REGRAS:
+Regras desta mensagem:
 - Use HTML do Telegram: <b>negrito</b>, <i>itálico</i>
-- Seja calorosa, gentil e direta — sem rodeios
 - Máximo 20 linhas
-- Termine sempre com UMA pergunta ou ação sugerida
-- Use emojis relevantes
-- Tom de amiga inteligente, não de robô
+- Modula o registro (A/B/C) conforme o momento exige — não force pergunta no final se a mensagem pede silêncio.
 
-Gere APENAS a mensagem, sem explicações.`
-    }]
+Gere APENAS a mensagem, sem explicações.`;
+
+  const resp = await anthropic.messages.create({
+    model: 'claude-opus-4-5',
+    max_tokens: 600,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: userPrompt }],
   });
   return resp.content[0].text;
 };
