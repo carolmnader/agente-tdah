@@ -134,6 +134,28 @@ async function hipotesesParaPrompt(maxN = 8, minConfianca = 0.6) {
   return data || [];
 }
 
+async function buscarAprendizadosNaoNotificados(limite = 3) {
+  const { data, error } = await supabase
+    .from('hipoteses')
+    .select('id, texto, confianca, tags')
+    .eq('status', 'validada')
+    .is('notificado_em', null)
+    .order('confianca', { ascending: false })
+    .limit(limite);
+  if (error) throw new Error(`buscarAprendizadosNaoNotificados: ${error.message}`);
+  return data || [];
+}
+
+async function marcarComoNotificadas(ids) {
+  if (!ids?.length) return { count: 0 };
+  const { error } = await supabase
+    .from('hipoteses')
+    .update({ notificado_em: nowISO() })
+    .in('id', ids);
+  if (error) throw new Error(`marcarComoNotificadas: ${error.message}`);
+  return { count: ids.length };
+}
+
 async function buscarHipotesesRelevantes(tags, maxN = 5) {
   if (!tags?.length) return [];
   const { data, error } = await supabase
@@ -179,6 +201,8 @@ module.exports = {
   recalcularConfianca,
   aplicarDecaimentoGlobal,
   hipotesesParaPrompt,
+  buscarAprendizadosNaoNotificados,
+  marcarComoNotificadas,
   buscarHipotesesRelevantes,
   resumoSemanal,
 };

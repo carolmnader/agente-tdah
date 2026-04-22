@@ -7,7 +7,7 @@ const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/a
 const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buscarAniversariosProximos } = require('../services/crm');
 const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/analytics');
-const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt } = require('../services/hipoteses');
+const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt, buscarAprendizadosNaoNotificados, marcarComoNotificadas } = require('../services/hipoteses');
 const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT } = require('../prompts/system');
@@ -29,6 +29,7 @@ FONTES (CRÍTICO — não inventar):
 - FACTUAIS (verdade se presentes, NÃO invente se vazias): agenda_do_dia, aniversarios_proximos, humor_3_dias. Só mencione o que está literalmente nestas chaves.
 - tarefas_pendentes: são reais (vêm do Supabase) mas NÃO são agenda — trate como "fazer se der tempo", nunca como compromissos do dia.
 - CONTEXTUAIS (pano de fundo, NÃO são agenda): memorias_relevantes, hipoteses_ativas. Use como observação ou cor, nunca como compromisso de hoje.
+- aprendizados_recentes: hipóteses recém-validadas sobre a Carol. Se o array tiver itens, INCLUA no briefing UM bloco destacado com marcador 🧠, no formato exato: "🧠 Algo que aprendi com certeza sobre você: [texto da hipótese de maior confiança]". Use só o primeiro item do array. Máximo 1 bloco por briefing. Se o array estiver vazio, não mencione nada.
 - Se agenda_do_dia estiver vazia ou ausente, diga literalmente "agenda livre hoje" ou similar. NÃO mencione exercício, estudo, reunião ou outros compromissos a menos que estejam em agenda_do_dia.
 
 Regras desta mensagem:
@@ -70,6 +71,7 @@ const jobBriefingMatinal = async () => {
       return { nome: p.nome, dias_ate: dias, relacionamento: p.relacionamento || null };
     });
     const hipoteses = await hipotesesParaPrompt(5);
+    const aprendizadosRecentes = await buscarAprendizadosNaoNotificados(3);
 
     const numEventos = (agendaLimpa.match(/⏰/g) || []).length;
     const agendaPesada = numEventos > 4;
@@ -93,11 +95,16 @@ const jobBriefingMatinal = async () => {
         humor_3_dias: humorRecente,
         aniversarios_proximos: aniversarios,
         hipoteses_ativas: hipoteses,
+        aprendizados_recentes: aprendizadosRecentes,
         sugestao: agendaPesada ? 'Sugerir deixar agenda mais leve' : 'Encorajar o dia'
       }
     });
 
     await enviarMensagemLonga(CAROL_CHAT_ID, msg);
+    if (aprendizadosRecentes.length > 0 && msg.includes('🧠')) {
+      await marcarComoNotificadas(aprendizadosRecentes.map(h => h.id));
+      console.log(`[Scheduler] 🧠 ${aprendizadosRecentes.length} aprendizado(s) marcado(s)`);
+    }
     await salvarMemoria('sistema', 'ultimo_briefing', agora.toISOString(), 'cron job matinal');
     console.log('[Scheduler] ✅ Briefing matinal enviado');
   } catch(e) {
