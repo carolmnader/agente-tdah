@@ -36,10 +36,27 @@ DADOS DO DIA:
 == Hipóteses já cadastradas (NÃO duplique) ==
 {HIPOTESES_EXISTENTES}
 
+Ao final da análise, se você detectar padrão claro que sugere melhoria ARQUITETURAL da própria ARIA (sistema, voz, features), retorne também o campo opcional:
+
+sugestoes_arquiteturais: [
+  {
+    titulo: string curta,
+    descricao: string explicativa, máx 2 frases,
+    categoria: feature | bug | refactor | voice_calibration,
+    prioridade: 1-5 (5 = crítico),
+    confianca: 0-1
+  }
+]
+
+Campo é OPCIONAL. Se não detectar nada claro, omita ou retorne array vazio. NÃO force sugestões se a noite não revelou nada arquitetural.
+
 Responda APENAS JSON válido (sem markdown, sem prefixo):
 {
   "hipoteses_novas": [
     { "texto": "frase observacional curta", "tags": ["tag1", "tag2"], "confianca_inicial": 0.50 }
+  ],
+  "sugestoes_arquiteturais": [
+    { "titulo": "...", "descricao": "...", "categoria": "feature", "prioridade": 3, "confianca": 0.5 }
   ]
 }`;
 
@@ -53,7 +70,7 @@ async function chamarAnaliseNoturna({ mensagens, humor, eventos, hipotesesExiste
   try {
     const r = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 800,
+      max_tokens: 1500,
       temperature: 0.3,
       messages: [{ role: 'user', content: prompt }],
     });

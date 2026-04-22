@@ -9,6 +9,7 @@ const { buscarAniversariosProximos } = require('../services/crm');
 const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/analytics');
 const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt, buscarAprendizadosNaoNotificados, marcarComoNotificadas } = require('../services/hipoteses');
 const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
+const { proporSugestao } = require('../services/sugestoes');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT } = require('../prompts/system');
 
@@ -306,6 +307,25 @@ const iniciarScheduler = () => {
           texto: h.texto, fonte: 'cron_noturno',
           tags: h.tags || [], contexto: 'analise_noturna_02h',
         });
+      }
+      const sugestoesGeradas = resultado?.sugestoes_arquiteturais || [];
+      if (sugestoesGeradas.length > 0) {
+        for (const s of sugestoesGeradas) {
+          try {
+            await proporSugestao({
+              titulo: s.titulo,
+              descricao: s.descricao,
+              categoria: s.categoria,
+              prioridade: s.prioridade || 3,
+              confianca: s.confianca || 0.5,
+              origem: 'cron_noturno',
+              contexto: { data_noite: new Date().toISOString() }
+            });
+          } catch (err) {
+            console.error('[Scheduler] Erro ao propor sugestão:', err.message);
+          }
+        }
+        console.log(`[Scheduler] 🔧 ${sugestoesGeradas.length} sugestão(ões) persistida(s)`);
       }
     } catch (e) {
       console.error('🌙 [Cron noturno] Erro:', e.message);
