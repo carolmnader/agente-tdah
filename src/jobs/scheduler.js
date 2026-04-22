@@ -5,17 +5,16 @@ const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClie
 const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria } = require('../services/memorySupabase');
 const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
-const { getCheckinMatinal } = require('../modules/holistic');
 const { buscarAniversariosProximos } = require('../services/crm');
 const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/analytics');
-const { aplicarDecaimentoGlobal, proporHipotese } = require('../services/hipoteses');
-const { analisarNoturno } = require('../services/analiseNoturna');
+const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt } = require('../services/hipoteses');
+const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT } = require('../prompts/system');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const { sendTelegramMessage } = require('../services/telegram');
+const { sendTelegramMessage, enviarMensagemLonga } = require('../services/telegram');
 const CAROL_CHAT_ID = process.env.TELEGRAM_CHAT_ID_CAROL;
 
 // ─── GERADOR DE MENSAGEM PROATIVA ────────────────────────────────────────────
@@ -26,6 +25,12 @@ const gerarMensagemProativa = async (contexto) => {
 TIPO: ${contexto.tipo}
 CONTEXTO: ${JSON.stringify(contexto.dados)}
 
+FONTES (CRÍTICO — não inventar):
+- FACTUAIS (verdade se presentes, NÃO invente se vazias): agenda_do_dia, aniversarios_proximos, humor_3_dias. Só mencione o que está literalmente nestas chaves.
+- tarefas_pendentes: são reais (vêm do Supabase) mas NÃO são agenda — trate como "fazer se der tempo", nunca como compromissos do dia.
+- CONTEXTUAIS (pano de fundo, NÃO são agenda): memorias_relevantes, hipoteses_ativas. Use como observação ou cor, nunca como compromisso de hoje.
+- Se agenda_do_dia estiver vazia ou ausente, diga literalmente "agenda livre hoje" ou similar. NÃO mencione exercício, estudo, reunião ou outros compromissos a menos que estejam em agenda_do_dia.
+
 Regras desta mensagem:
 - Use HTML do Telegram: <b>negrito</b>, <i>itálico</i>
 - Máximo 20 linhas
@@ -35,7 +40,7 @@ Gere APENAS a mensagem, sem explicações.`;
 
   const resp = await anthropic.messages.create({
     model: 'claude-opus-4-5',
-    max_tokens: 600,
+    max_tokens: 1500,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
   });
@@ -53,12 +58,22 @@ const jobBriefingMatinal = async () => {
     const lua = getFaseLunarLocal(agora);
     const ayurveda = getContextoAyurveda();
     const tarefas = await listarTarefas('aberta');
-    const memorias = await buscarMemorias(null, 10);
+
+    const humorRecente = await buscarHumor3dias();
+    const aniversariosRaw = await buscarAniversariosProximos(7);
+    const aniversarios = aniversariosRaw.map(p => {
+      const hoje = new Date(agora.toISOString().slice(0, 10));
+      const aniv = new Date(p.aniversario);
+      aniv.setFullYear(hoje.getFullYear());
+      if (aniv < hoje) aniv.setFullYear(hoje.getFullYear() + 1);
+      const dias = Math.round((aniv - hoje) / 86400000);
+      return { nome: p.nome, dias_ate: dias, relacionamento: p.relacionamento || null };
+    });
+    const hipoteses = await hipotesesParaPrompt(5);
 
     const numEventos = (agendaLimpa.match(/⏰/g) || []).length;
     const agendaPesada = numEventos > 4;
 
-    const checkin = getCheckinMatinal();
     const ayurvedaMsg = getMensagemAyurvedica(agora);
 
     const msg = await gerarMensagemProativa({
@@ -74,14 +89,15 @@ const jobBriefingMatinal = async () => {
         horario_ayurveda: `${ayurveda.bloco.nome} — ${ayurveda.estrategia.energia}`,
         mensagem_ayurveda: ayurvedaMsg.replace(/<[^>]*>/g, ''),
         alerta_tdah: ayurveda.estrategia.alerta_tdah,
-        checkin_4d: checkin.replace(/[🧍🧠💛⚡]/g, '').substring(0, 200),
         tarefas_pendentes: tarefas.slice(0, 3).map(t => t.titulo),
-        memorias_relevantes: memorias.slice(0, 5).map(m => `${m.chave}: ${m.valor}`),
+        humor_3_dias: humorRecente,
+        aniversarios_proximos: aniversarios,
+        hipoteses_ativas: hipoteses,
         sugestao: agendaPesada ? 'Sugerir deixar agenda mais leve' : 'Encorajar o dia'
       }
     });
 
-    await sendTelegramMessage(CAROL_CHAT_ID, msg);
+    await enviarMensagemLonga(CAROL_CHAT_ID, msg);
     await salvarMemoria('sistema', 'ultimo_briefing', agora.toISOString(), 'cron job matinal');
     console.log('[Scheduler] ✅ Briefing matinal enviado');
   } catch(e) {
