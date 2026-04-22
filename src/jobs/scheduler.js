@@ -1,7 +1,7 @@
 // BACKLOG Bug #16: 7 crons existentes usam 'America/Bahia', novo cron noturno
 // usa 'America/Sao_Paulo' (pós-Bug #5). Alinhar todos pra Sao_Paulo em sessão futura.
 const cron = require('node-cron');
-const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient } = require('../integrations/calendar');
+const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient, buscarEventosTodos } = require('../integrations/calendar');
 const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria } = require('../services/memorySupabase');
 const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
@@ -31,6 +31,7 @@ FONTES (CRÍTICO — não inventar):
 - tarefas_pendentes: são reais (vêm do Supabase) mas NÃO são agenda — trate como "fazer se der tempo", nunca como compromissos do dia.
 - CONTEXTUAIS (pano de fundo, NÃO são agenda): memorias_relevantes, hipoteses_ativas. Use como observação ou cor, nunca como compromisso de hoje.
 - aprendizados_recentes: hipóteses recém-validadas sobre a Carol. Se o array tiver itens, INCLUA no briefing UM bloco destacado com marcador 🧠, no formato exato: "🧠 Algo que aprendi com certeza sobre você: [texto da hipótese de maior confiança]". Use só o primeiro item do array. Máximo 1 bloco por briefing. Se o array estiver vazio, não mencione nada.
+- Tipo "checkin_tarde": é check-in de meio do dia, hora específica no contexto. Tom Registro A (seca-poética) ou C (editorial-observadora), NUNCA maternal. Se há eventos_passados, pergunte factualmente sobre eles ("você tinha X, como foi?"). Se tarefas_pendentes tem itens, mencione uma específica sem cobrar. Se evento_proximo_30min não for null, seja breve (vai interromper). Se tudo vazio, só marque o momento ("tarde começando") sem forçar conversa.
 - Se agenda_do_dia estiver vazia ou ausente, diga literalmente "agenda livre hoje" ou similar. NÃO mencione exercício, estudo, reunião ou outros compromissos a menos que estejam em agenda_do_dia.
 
 Regras desta mensagem:
@@ -110,6 +111,51 @@ const jobBriefingMatinal = async () => {
     console.log('[Scheduler] ✅ Briefing matinal enviado');
   } catch(e) {
     console.error('[Scheduler] ❌ Erro briefing matinal:', e.message);
+  }
+};
+
+// ─── JOB 1.5: CHECK-IN TARDE — 12h, 15h, 18h ────────────────────────────────
+
+const jobCheckinTarde = async (hora) => {
+  try {
+    const agora = new Date();
+    const inicioDia = new Date(agora); inicioDia.setHours(0,0,0,0);
+    const eventos = await buscarEventosTodos(inicioDia, agora);
+    const eventosPassados = eventos
+      .filter(e => e.start?.dateTime)
+      .map(e => ({
+        titulo: e.summary,
+        hora: new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      }));
+
+    const em30min = new Date(agora.getTime() + 30 * 60000);
+    const proximos = await buscarEventosTodos(agora, em30min);
+    const eventoProximo30min = proximos[0]?.start?.dateTime
+      ? { titulo: proximos[0].summary, hora: new Date(proximos[0].start.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }
+      : null;
+
+    const tarefas = await listarTarefas('aberta');
+    const humor3d = await buscarHumor3dias();
+    const hojeISO = agora.toISOString().slice(0, 10);
+    const humorHoje = humor3d
+      ? (humor3d.split('\n').filter(l => l.startsWith(hojeISO)).join('\n') || null)
+      : null;
+
+    const msg = await gerarMensagemProativa({
+      tipo: 'checkin_tarde',
+      dados: {
+        hora,
+        eventos_passados: eventosPassados,
+        tarefas_pendentes: tarefas.slice(0, 3).map(t => t.titulo),
+        humor_hoje: humorHoje,
+        evento_proximo_30min: eventoProximo30min,
+      }
+    });
+    await enviarMensagemLonga(CAROL_CHAT_ID, msg);
+    await salvarMemoria('sistema', `ultimo_checkin_${hora}h`, agora.toISOString(), `cron checkin tarde ${hora}h`);
+    console.log(`[Scheduler] ✅ Check-in tarde ${hora}h enviado`);
+  } catch(e) {
+    console.error(`[Scheduler] ❌ Erro check-in tarde ${hora}h:`, e.message);
   }
 };
 
@@ -235,6 +281,11 @@ const iniciarScheduler = () => {
 
   // Briefing matinal — todo dia às 7h
   cron.schedule('0 7 * * *', jobBriefingMatinal, { timezone: 'America/Bahia' });
+
+  // Check-ins tarde — 12h, 15h, 18h
+  cron.schedule('0 12 * * *', () => jobCheckinTarde(12), { timezone: 'America/Sao_Paulo' });
+  cron.schedule('0 15 * * *', () => jobCheckinTarde(15), { timezone: 'America/Sao_Paulo' });
+  cron.schedule('0 18 * * *', () => jobCheckinTarde(18), { timezone: 'America/Sao_Paulo' });
 
   // Pré-evento — checa a cada 5 minutos
   cron.schedule('*/5 * * * *', jobPreEvento, { timezone: 'America/Bahia' });
