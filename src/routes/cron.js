@@ -50,6 +50,14 @@ router.get('/semanal', wrapJob('semanal', () => jobs.jobPlanejamentoSemanal()));
 router.get('/aniversarios', wrapJob('aniversarios', () => jobs.jobAniversarios()));
 router.get('/relatorio-semanal', wrapJob('relatorio-semanal', () => jobs.jobRelatorioSemanal()));
 router.get('/relatorio-mensal', wrapJob('relatorio-mensal', () => jobs.jobRelatorioMensal()));
-router.get('/noturno', wrapJob('noturno', () => jobs.jobAnaliseNoturna()));
+// Análise Noturna — fire-and-forget (Bug #21). Job pode durar >30s (Haiku
+// + múltiplos Supabase calls). Cron-job.org só precisa saber que chegou.
+router.get('/noturno', (req, res) => {
+  res.json({ ok: true, job: 'noturno', mode: 'async' });
+  console.log('[Cron] noturno iniciando (async)');
+  jobs.jobAnaliseNoturna()
+    .then(() => console.log('[Cron] noturno concluído (async)'))
+    .catch(e => console.error('[Cron/noturno] erro async:', e.message));
+});
 
 module.exports = router;
