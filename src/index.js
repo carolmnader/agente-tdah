@@ -9,6 +9,7 @@ const { think } = require("./services/brain");
 const { startScheduler } = require("./services/scheduler");
 const { iniciarScheduler } = require("./jobs/scheduler");
 const telegramRoutes = require("./routes/telegram");
+const cronRoutes = require("./routes/cron");
 
 const app = express();
 app.use(express.json());
@@ -24,6 +25,7 @@ app.get("/health", (req, res) => {
 // Rotas Telegram
 app.use("/api", telegramRoutes);
 app.use("/webhook", telegramRoutes);
+app.use("/api/cron", cronRoutes);
 // Rota de debug
 app.get("/test", (req, res) => {
   res.json({ status: "ok", WHATSAPP_VERIFY_TOKEN: process.env.WHATSAPP_VERIFY_TOKEN || "NÃO DEFINIDO" });

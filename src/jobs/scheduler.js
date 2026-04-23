@@ -271,6 +271,97 @@ const jobPlanejamentoSemanal = async () => {
   }
 };
 
+// ─── JOB 5: ANIVERSÁRIOS — todo dia às 8h ───────────────────────────────────
+
+const jobAniversarios = async () => {
+  try {
+    const aniversarios = await buscarAniversariosProximos(2);
+    for (const p of aniversarios) {
+      const aniv = new Date(p.aniversario);
+      const hoje = new Date();
+      const proxAniv = new Date(hoje.getFullYear(), aniv.getMonth(), aniv.getDate());
+      const diff = Math.round((proxAniv - hoje) / (1000 * 60 * 60 * 24));
+
+      let msg = '';
+      if (diff === 0) {
+        msg = `🎂 <b>Hoje é aniversário de ${p.nome}!</b>\n\nQuer enviar uma mensagem? 💙`;
+      } else if (diff === 1) {
+        msg = `🎂 <b>Amanhã é aniversário de ${p.nome}!</b>\n\nQuer que eu te lembre de parabenizar? 💙`;
+      } else if (diff === 2) {
+        msg = `🎂 <b>Em 2 dias é aniversário de ${p.nome}!</b>\n\nQuer que eu te lembre de parabenizar? 💙`;
+      }
+
+      if (msg) await sendTelegramMessage(CAROL_CHAT_ID, msg);
+    }
+    console.log('[Scheduler] ✅ Job aniversários executado');
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro aniversários:', e.message);
+  }
+};
+
+// ─── JOB 6: RELATÓRIO SEMANAL — domingo às 17h ──────────────────────────────
+
+const jobRelatorioSemanal = async () => {
+  try {
+    const relatorio = await gerarRelatorioSemanal();
+    await sendTelegramMessage(CAROL_CHAT_ID, '📊 <b>Seu relatório semanal chegou!</b>\n\n' + relatorio);
+    console.log('[Scheduler] ✅ Relatório semanal enviado');
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro relatório semanal:', e.message);
+  }
+};
+
+// ─── JOB 7: RELATÓRIO MENSAL — dia 1 às 9h ──────────────────────────────────
+
+const jobRelatorioMensal = async () => {
+  try {
+    const relatorio = await gerarRelatorioMensal();
+    await sendTelegramMessage(CAROL_CHAT_ID, '📈 <b>Seu relatório mensal chegou!</b>\n\n' + relatorio);
+    console.log('[Scheduler] ✅ Relatório mensal enviado');
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro relatório mensal:', e.message);
+  }
+};
+
+// ─── JOB 8: ANÁLISE NOTURNA (memória evolutiva) — todo dia às 2h ────────────
+
+const jobAnaliseNoturna = async () => {
+  console.log('🌙 [Cron noturno] Iniciando análise...');
+  try {
+    const decaimento = await aplicarDecaimentoGlobal();
+    console.log(`🌙 Decaimento aplicado em ${decaimento} hipóteses`);
+    const resultado = await analisarNoturno();
+    console.log(`🌙 Análise gerou ${resultado.hipoteses_novas.length} hipóteses novas`);
+    for (const h of resultado.hipoteses_novas) {
+      await proporHipotese({
+        texto: h.texto, fonte: 'cron_noturno',
+        tags: h.tags || [], contexto: 'analise_noturna_02h',
+      });
+    }
+    const sugestoesGeradas = resultado?.sugestoes_arquiteturais || [];
+    if (sugestoesGeradas.length > 0) {
+      for (const s of sugestoesGeradas) {
+        try {
+          await proporSugestao({
+            titulo: s.titulo,
+            descricao: s.descricao,
+            categoria: s.categoria,
+            prioridade: s.prioridade || 3,
+            confianca: s.confianca || 0.5,
+            origem: 'cron_noturno',
+            contexto: { data_noite: new Date().toISOString() }
+          });
+        } catch (err) {
+          console.error('[Scheduler] Erro ao propor sugestão:', err.message);
+        }
+      }
+      console.log(`[Scheduler] 🔧 ${sugestoesGeradas.length} sugestão(ões) persistida(s)`);
+    }
+  } catch (e) {
+    console.error('🌙 [Cron noturno] Erro:', e.message);
+  }
+};
+
 // ─── INICIALIZAÇÃO DOS JOBS ───────────────────────────────────────────────────
 
 const iniciarScheduler = () => {
@@ -297,91 +388,16 @@ const iniciarScheduler = () => {
   cron.schedule('0 18 * * 0', jobPlanejamentoSemanal, { timezone: 'America/Bahia' });
 
   // Aniversários — todo dia às 8h
-  cron.schedule('0 8 * * *', async () => {
-    try {
-      const aniversarios = await buscarAniversariosProximos(2);
-      for (const p of aniversarios) {
-        const aniv = new Date(p.aniversario);
-        const hoje = new Date();
-        const proxAniv = new Date(hoje.getFullYear(), aniv.getMonth(), aniv.getDate());
-        const diff = Math.round((proxAniv - hoje) / (1000 * 60 * 60 * 24));
-
-        let msg = '';
-        if (diff === 0) {
-          msg = `🎂 <b>Hoje é aniversário de ${p.nome}!</b>\n\nQuer enviar uma mensagem? 💙`;
-        } else if (diff === 1) {
-          msg = `🎂 <b>Amanhã é aniversário de ${p.nome}!</b>\n\nQuer que eu te lembre de parabenizar? 💙`;
-        } else if (diff === 2) {
-          msg = `🎂 <b>Em 2 dias é aniversário de ${p.nome}!</b>\n\nQuer que eu te lembre de parabenizar? 💙`;
-        }
-
-        if (msg) await sendTelegramMessage(CAROL_CHAT_ID, msg);
-      }
-      console.log('[Scheduler] ✅ Job aniversários executado');
-    } catch(e) {
-      console.error('[Scheduler] ❌ Erro aniversários:', e.message);
-    }
-  }, { timezone: 'America/Bahia' });
+  cron.schedule('0 8 * * *', jobAniversarios, { timezone: 'America/Bahia' });
 
   // Relatório semanal — domingo às 17h
-  cron.schedule('0 17 * * 0', async () => {
-    try {
-      const relatorio = await gerarRelatorioSemanal();
-      await sendTelegramMessage(CAROL_CHAT_ID, '📊 <b>Seu relatório semanal chegou!</b>\n\n' + relatorio);
-      console.log('[Scheduler] ✅ Relatório semanal enviado');
-    } catch(e) {
-      console.error('[Scheduler] ❌ Erro relatório semanal:', e.message);
-    }
-  }, { timezone: 'America/Bahia' });
+  cron.schedule('0 17 * * 0', jobRelatorioSemanal, { timezone: 'America/Bahia' });
 
   // Relatório mensal — dia 1 de cada mês às 9h
-  cron.schedule('0 9 1 * *', async () => {
-    try {
-      const relatorio = await gerarRelatorioMensal();
-      await sendTelegramMessage(CAROL_CHAT_ID, '📈 <b>Seu relatório mensal chegou!</b>\n\n' + relatorio);
-      console.log('[Scheduler] ✅ Relatório mensal enviado');
-    } catch(e) {
-      console.error('[Scheduler] ❌ Erro relatório mensal:', e.message);
-    }
-  }, { timezone: 'America/Bahia' });
+  cron.schedule('0 9 1 * *', jobRelatorioMensal, { timezone: 'America/Bahia' });
 
   // Memória evolutiva — análise noturna todo dia às 2h (não notifica Carol, só registra hipóteses)
-  cron.schedule('0 2 * * *', async () => {
-    console.log('🌙 [Cron noturno] Iniciando análise...');
-    try {
-      const decaimento = await aplicarDecaimentoGlobal();
-      console.log(`🌙 Decaimento aplicado em ${decaimento} hipóteses`);
-      const resultado = await analisarNoturno();
-      console.log(`🌙 Análise gerou ${resultado.hipoteses_novas.length} hipóteses novas`);
-      for (const h of resultado.hipoteses_novas) {
-        await proporHipotese({
-          texto: h.texto, fonte: 'cron_noturno',
-          tags: h.tags || [], contexto: 'analise_noturna_02h',
-        });
-      }
-      const sugestoesGeradas = resultado?.sugestoes_arquiteturais || [];
-      if (sugestoesGeradas.length > 0) {
-        for (const s of sugestoesGeradas) {
-          try {
-            await proporSugestao({
-              titulo: s.titulo,
-              descricao: s.descricao,
-              categoria: s.categoria,
-              prioridade: s.prioridade || 3,
-              confianca: s.confianca || 0.5,
-              origem: 'cron_noturno',
-              contexto: { data_noite: new Date().toISOString() }
-            });
-          } catch (err) {
-            console.error('[Scheduler] Erro ao propor sugestão:', err.message);
-          }
-        }
-        console.log(`[Scheduler] 🔧 ${sugestoesGeradas.length} sugestão(ões) persistida(s)`);
-      }
-    } catch (e) {
-      console.error('🌙 [Cron noturno] Erro:', e.message);
-    }
-  }, { timezone: 'America/Sao_Paulo' });
+  cron.schedule('0 2 * * *', jobAnaliseNoturna, { timezone: 'America/Sao_Paulo' });
 
   console.log('[Scheduler] ✅ Jobs ativos:');
   console.log('  🌅 Briefing matinal: todo dia às 7h');
@@ -394,4 +410,15 @@ const iniciarScheduler = () => {
   console.log('  🌙 Análise evolutiva (memória): todo dia às 2h');
 };
 
-module.exports = { iniciarScheduler, jobBriefingMatinal, jobResumoNoturno, jobPlanejamentoSemanal };
+module.exports = {
+  iniciarScheduler,
+  jobBriefingMatinal,
+  jobCheckinTarde,
+  jobPreEvento,
+  jobResumoNoturno,
+  jobPlanejamentoSemanal,
+  jobAniversarios,
+  jobRelatorioSemanal,
+  jobRelatorioMensal,
+  jobAnaliseNoturna,
+};
