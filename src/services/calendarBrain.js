@@ -76,6 +76,35 @@ const PADROES_RECORRENCIA = [
 ];
 const REGEX_ESSA_SEMANA = /\b(essa|esta|nessa|nesta)\s+semana\b/i;
 
+// Bug #12 + #19: pré-classificador JS de consulta de evento.
+// Bypass do Opus em perguntas óbvias sobre horário — Opus tende a marcar como
+// nao_e_calendar e responder do histórico (Bug #12 confirmado em prod 04/05).
+const RE_CONSULTA_FORTE = /^\s*(que horas|a que horas|quando)\b/i;
+const RE_CONSULTA_TEM = /^\s*(tem|tenho)\b/i;
+const RE_FALSO_POSITIVO_TEM = /^\s*(tenho que|tenho de|tem que|tem de|tenho um\b|tenho uma\b|tenho mil|tenho (ideia|vontade|certeza|raiva|medo|fome|sono)|tem (gente|alguém|alguem|algo|comida|certeza|jeito|ideia))/i;
+
+function extrairTermoConsulta(msg) {
+  let t = String(msg || '').trim()
+    .replace(/[?!.]+$/, '')
+    .replace(/^(que horas|a que horas|quando|tem|tenho)\s+/i, '')
+    .replace(/^(é|e|sao|são|fica)\s+/i, '')
+    .replace(/^(o|a|os|as|meu|minha|meus|minhas|um|uma)\s+/i, '')
+    .replace(/\s+(hoje|amanh[ãa]|essa semana|nesta semana|na (segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo))\s*$/i, '')
+    .trim();
+  return t.length >= 2 ? t : null;
+}
+
+function preClassificarConsulta(msg) {
+  if (!msg) return null;
+  const m = String(msg).trim();
+  const ehForte = RE_CONSULTA_FORTE.test(m);
+  const ehTem = RE_CONSULTA_TEM.test(m) && !RE_FALSO_POSITIVO_TEM.test(m);
+  if (!ehForte && !ehTem) return null;
+  const termo = extrairTermoConsulta(m);
+  if (!termo) return null;
+  return { acao: 'consultar_evento', evento_original: termo, raciocinio: 'pre-classificador JS (bypass Opus)' };
+}
+
 function dicaIntent(msg) {
   if (!msg) return null;
   // Recorrência tem prioridade — verbo de criação ("agenda"/"cria") não está no REGEX_VERBO_MUDANCA
@@ -432,14 +461,20 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       .replace('{DICA_INTENT}', dica || 'nenhuma')
       .replace('{MENSAGEM}', mensagem);
 
-    const respIA = await anthropic.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 600,
-      messages: [{ role: 'user', content: prompt }]
-    });
-
-    const texto = respIA.content[0].text.trim().replace(/```json|```/g,'').trim();
-    const intent = JSON.parse(texto);
+    // Bug #12: pré-classificador JS para perguntas claras sobre horário —
+    // bypass do Opus, que tende a marcar como nao_e_calendar e responder do histórico.
+    let intent = preClassificarConsulta(mensagem);
+    if (intent) {
+      console.log(`📅 [CalendarBrain] Pré-classificador: consultar_evento "${intent.evento_original}" (Opus bypassed)`);
+    } else {
+      const respIA = await anthropic.messages.create({
+        model: 'claude-opus-4-5',
+        max_tokens: 600,
+        messages: [{ role: 'user', content: prompt }]
+      });
+      const texto = respIA.content[0].text.trim().replace(/```json|```/g,'').trim();
+      intent = JSON.parse(texto);
+    }
 
     console.log(`📅 [CalendarBrain] Ação: ${intent.acao} | Título: ${intent.titulo || '-'} | Raciocínio: ${intent.raciocinio || '-'}`);
 
@@ -627,4 +662,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar, dicaIntent, resolverDataHora };
+module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta };

@@ -215,6 +215,49 @@ async function h4() {
 }
 
 // ────────────────────────────────────────────────────────
+// H5) preClassificarConsulta — pega perguntas claras, ignora falsos positivos
+// ────────────────────────────────────────────────────────
+function h5() {
+  delete require.cache[require.resolve('./src/services/calendarBrain')];
+  const { preClassificarConsulta } = require('./src/services/calendarBrain');
+
+  // Verdadeiros positivos
+  const positivos = [
+    ['que horas é o almoço?', 'almoço'],
+    ['Que horas é o almoço hoje?', 'almoço'],
+    ['quando é a reunião com Ana?', 'reunião com Ana'],
+    ['a que horas é meu treino amanhã?', 'treino'],
+    ['tem psicólogo amanhã?', 'psicólogo'],
+    ['tenho almoço com Marcela hoje?', 'almoço com Marcela'],
+  ];
+  positivos.forEach(([msg, termoEsperado]) => {
+    const r = preClassificarConsulta(msg);
+    assert(
+      r?.acao === 'consultar_evento' && r.evento_original?.toLowerCase().includes(termoEsperado.toLowerCase()),
+      `H5+) "${msg}" → consultar_evento "${termoEsperado}"`,
+      `result=${JSON.stringify(r)}`
+    );
+  });
+
+  // Falsos positivos (NÃO devem virar consultar_evento)
+  const negativos = [
+    'tenho que fazer mil coisas hoje',
+    'tenho de comprar pão',
+    'tem comida na geladeira?',
+    'tem alguém aí?',
+    'tem certeza?',
+    'agenda almoço amanhã às 13h',
+    'muda o almoço pra 14h',
+    'cancela o psicólogo',
+    'tenho ideia de fazer um projeto',
+  ];
+  negativos.forEach(msg => {
+    const r = preClassificarConsulta(msg);
+    assert(r === null, `H5-) "${msg}" → NÃO bypassa Opus (null)`, `result=${JSON.stringify(r)}`);
+  });
+}
+
+// ────────────────────────────────────────────────────────
 // Runner
 // ────────────────────────────────────────────────────────
 (async () => {
@@ -223,6 +266,7 @@ async function h4() {
     await h2();
     h3();
     await h4();
+    h5();
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`✅ ${passed} passou  |  ❌ ${failed} falhou  (de ${passed + failed})`);
     process.exit(failed > 0 ? 1 : 0);
