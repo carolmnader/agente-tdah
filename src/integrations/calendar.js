@@ -1,6 +1,21 @@
 const { google } = require('googleapis');
 require('dotenv').config();
 
+class CalendarInsertError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = 'CalendarInsertError';
+    this.cause = cause;
+  }
+}
+class CalendarOperationError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = 'CalendarOperationError';
+    this.cause = cause;
+  }
+}
+
 const getAuthClient = () => {
   const auth = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
@@ -319,16 +334,28 @@ const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categori
     };
     if (recurrence) eventResource.recurrence = [recurrence];
 
-    await cal.events.insert({ calendarId, resource: eventResource });
+    // Bug #11: validar retorno da API. ARIA só pode dizer "✅ criado" depois de ver data.id.
+    const result = await cal.events.insert({ calendarId, resource: eventResource });
+    if (!result?.data?.id) {
+      throw new CalendarInsertError(
+        `events.insert retornou sem id (status=${result?.status}, calendarId=${calendarId})`,
+        null
+      );
+    }
 
     // Buffer só pra eventos não-recorrentes (evita N buffers em série)
+    // Buffer é nice-to-have: se falhar, evento principal já existe — log e segue.
     if (!recurrence) {
       const bufferFim = new Date(fim.getTime() + 20 * 60000);
-      await cal.events.insert({ calendarId, resource: {
-        summary: '🌿 Buffer / Transição', colorId: '8',
-        start: { dateTime: fim.toISOString(), timeZone: TIMEZONE },
-        end: { dateTime: bufferFim.toISOString(), timeZone: TIMEZONE }
-      }});
+      try {
+        await cal.events.insert({ calendarId, resource: {
+          summary: '🌿 Buffer / Transição', colorId: '8',
+          start: { dateTime: fim.toISOString(), timeZone: TIMEZONE },
+          end: { dateTime: bufferFim.toISOString(), timeZone: TIMEZONE }
+        }});
+      } catch (bufErr) {
+        console.warn(`[criarEvento] buffer falhou (evento principal OK): ${bufErr.message}`);
+      }
     }
 
     const dia = `${formatarDiaSemana(inicio)}, ${inicio.toLocaleDateString('pt-BR')}`;
@@ -338,7 +365,10 @@ const criarEvento = async (titulo, dataHoraInicio, duracaoMinutos = 60, categori
       return `🔁 <b>Recorrência criada!</b>\n\n${info.emoji} ${titulo}\n📅 Início: ${dia} às ${hora}\n⏱️ ${duracaoMinutos}min cada\n🔢 ${recurrence.replace('RRULE:', '')}\n📂 Agenda: ${info.nome}`;
     }
     return `✅ <b>Agendado!</b>\n\n${info.emoji} ${titulo}\n📅 ${dia} às ${hora}\n⏱️ ${duracaoMinutos}min\n🌿 Buffer de 20min reservado\n📂 Agenda: ${info.nome}\n\nQuer ajustar algo?`;
-  } catch(e) { return `❌ Erro ao criar evento: ${e.message}`; }
+  } catch(e) {
+    if (e instanceof CalendarInsertError) throw e;
+    throw new CalendarInsertError(`Falha em criarEvento: ${e.message}`, e);
+  }
 };
 
 // 4. BUSCAR EVENTO POR NOME — em todos os calendários
@@ -481,4 +511,4 @@ const proximoHorarioLivre = async (duracaoMinutos = 60) => {
   } catch(e) { return `❌ Erro: ${e.message}`; }
 };
 
-module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA, normalizarBusca };
+module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA, normalizarBusca, CalendarInsertError, CalendarOperationError };

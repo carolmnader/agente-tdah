@@ -289,6 +289,15 @@ REGRAS ABSOLUTAS:
 7. LOTE: se houver 2+ eventos, use criar_lote com array completo.
 8. LINGUAGEM INFORMAL: "bota"=criar, "tira"/"desmarca"=cancelar, "empurra"/"puxa"/"move"=reagendar, "reorganiza"=reorganizar.
 9. MUDAR CALENDÁRIO: "muda categoria para Saúde", "coloca no Trabalho", "põe no Selfcare" → acao: mudar_calendario. O evento_original é o evento mencionado anteriormente no histórico ou na mensagem.
+10. CONSULTAR EVENTO (Bug #12): perguntas sobre quando/que horas é um evento → acao: consultar_evento. SEMPRE consulte o Calendar real via essa ação — ela aciona buscarEvento que é a única fonte de verdade sobre eventos. O histórico da conversa é só contexto, nunca fonte factual sobre horários.
+
+EXEMPLOS DE CONSULTAR EVENTO:
+- "que horas é o almoço?" → acao: consultar_evento, evento_original: "almoço"
+- "quando é a reunião com Ana?" → acao: consultar_evento, evento_original: "reunião Ana"
+- "tem psicólogo amanhã?" → acao: consultar_evento, evento_original: "psicólogo"
+- "a que horas é meu treino hoje?" → acao: consultar_evento, evento_original: "treino"
+- (NÃO confundir) "agenda almoço amanhã às 13h" → acao: criar (verbo de criação)
+- (NÃO confundir) "muda almoço pra 14h" → acao: reagendar (verbo de mudança)
 
 EXEMPLOS DE MUDAR CALENDÁRIO:
 - "muda categoria para Saúde" → acao: mudar_calendario, calendario: "Saúde", evento_original: último evento mencionado
@@ -335,7 +344,7 @@ EXEMPLOS DE RECORRÊNCIA:
 
 RETORNE APENAS JSON:
 {
-  "acao": "ver_hoje|ver_semana|criar|criar_lote|criar_recorrente|reagendar|cancelar|horario_livre|reorganizar|mudar_calendario|nao_e_calendar",
+  "acao": "ver_hoje|ver_semana|criar|criar_lote|criar_recorrente|reagendar|cancelar|consultar_evento|horario_livre|reorganizar|mudar_calendario|nao_e_calendar",
   "titulo": "emoji + nome ou null",
   "data": "hoje|amanha|segunda|terca|quarta|quinta|sexta|sabado|domingo|DD/MM|null",
   "hora": "HH:MM|null",
@@ -445,6 +454,35 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
     if (intent.acao === 'ver_hoje') return await listarEventosHoje();
     if (intent.acao === 'ver_semana') return await listarEventosSemana();
     if (intent.acao === 'horario_livre') return await proximoHorarioLivre(intent.duracao_minutos || 60);
+
+    // CONSULTAR EVENTO (Bug #12) — sempre consulta Calendar real, nunca infere do histórico
+    if (intent.acao === 'consultar_evento') {
+      const termo = intent.evento_original || intent.titulo;
+      if (!termo) return '📅 Qual evento você quer consultar?';
+      const eventos = await buscarComSinonimos(termo, intent.sinonimos_busca || []);
+      if (!eventos.length) {
+        return `❌ Não achei "<b>${termo}</b>" na agenda. Quer que eu crie?`;
+      }
+      if (eventos.length > 1) {
+        let txt = `Achei ${eventos.length} eventos com "<b>${termo}</b>":\n\n`;
+        const { getCalendarioInfo } = require('../integrations/calendar');
+        eventos.slice(0, 5).forEach(ev => {
+          const info = getCalendarioInfo(ev._calendarId);
+          const d = new Date(ev.start.dateTime || ev.start.date);
+          const dia = d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+          const hora = ev.start.dateTime ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
+          txt += `${info.emoji} ${ev.summary} — ${dia} às ${hora}\n`;
+        });
+        return txt;
+      }
+      const ev = eventos[0];
+      const { getCalendarioInfo } = require('../integrations/calendar');
+      const info = getCalendarioInfo(ev._calendarId);
+      const d = new Date(ev.start.dateTime || ev.start.date);
+      const dia = d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+      const hora = ev.start.dateTime ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
+      return `${info.emoji} <b>${ev.summary}</b>\n📅 ${dia} às ${hora}\n📂 Agenda: ${info.nome}`;
+    }
 
     // CRIAR
     if (intent.acao === 'criar') {
@@ -580,8 +618,12 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
     return null;
 
   } catch(e) {
-    console.error('[CalendarBrain] Erro:', e.message);
-    return null;
+    // Bug #11+#13: null é reservado pra "não é calendar" (path intencional).
+    // Erro de infra propaga — catch-all do brain.js diferencia o tipo e responde direto.
+    const { CalendarOperationError, CalendarInsertError } = require('../integrations/calendar');
+    console.error('[CalendarBrain] Erro:', { name: e.name, message: e.message, stack: e.stack });
+    if (e instanceof CalendarInsertError || e instanceof CalendarOperationError) throw e;
+    throw new CalendarOperationError(`Falha em processarCalendar: ${e.message}`, e);
   }
 };
 

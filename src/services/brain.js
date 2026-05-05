@@ -425,13 +425,10 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
     }
 
     // Passo 0c: Calendar inteligente (NLP via Claude)
+    // Bug #13: erros de Calendar não são engolidos aqui — propagam pro catch-all do think()
+    // que diferencia tipo e devolve mensagem específica em vez de "probleminha técnico" genérico.
     console.log(`=== BRAIN RECEBEU: "${message.substring(0, 50)}"`);
-    let respostaCalendar = null;
-    try {
-      respostaCalendar = await processarCalendar(message, await getHistory(), chatId);
-    } catch(e) {
-      console.log('📅 [Calendar] Pulando calendar:', e.message);
-    }
+    const respostaCalendar = await processarCalendar(message, await getHistory(), chatId);
     if (respostaCalendar !== null) {
       console.log('📅 [CalendarBrain] Resposta interceptada pelo Calendar');
       await addMessage('user', message);
@@ -525,12 +522,48 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
     return ariaResponse;
 
   } catch (error) {
-    console.error('Erro no Brain:', error.message);
+    // Bug #13: log estruturado com tipo, status e cause — para Vercel logs ficarem úteis
+    console.error('Erro no Brain:', {
+      name: error?.constructor?.name || error?.name,
+      message: error?.message,
+      status: error?.status,
+      type: error?.error?.type,
+      cause: error?.cause?.message,
+      stack: error?.stack,
+    });
+    const fallback = classifyBrainError(error);
     await addMessage('user', message).catch(() => {});
-    const fallback = 'Ei, estou aqui! Tive um probleminha técnico agora. Pode repetir? 💜';
     await addMessage('assistant', fallback).catch(() => {});
     return fallback;
   }
+}
+
+// Bug #13: roteador puro de erro → fallback. Pure function, fácil de testar.
+// Duck-typing (não instanceof) pra ser robusto a versão do SDK Anthropic.
+function classifyBrainError(error) {
+  const anthropicType = error?.error?.type;
+  if (anthropicType === 'invalid_request_error') {
+    return 'Carol, API Anthropic retornou invalid_request_error. Saldo zerado? Verifica console.anthropic.com/settings/billing.';
+  }
+  if (anthropicType === 'authentication_error') {
+    return 'Carol, autenticação Anthropic falhou. Verifica ANTHROPIC_API_KEY no Vercel.';
+  }
+  if (anthropicType === 'rate_limit_error') {
+    return 'Carol, rate limit Anthropic. Espera uns segundos.';
+  }
+  if (anthropicType === 'overloaded_error') {
+    return 'Anthropic sobrecarregada agora. Tenta de novo em 1min.';
+  }
+  if (anthropicType) {
+    return `Carol, erro Anthropic ${error?.status || '?'}: ${anthropicType}. Olha o log.`;
+  }
+  if (error?.name === 'CalendarOperationError' || error?.name === 'CalendarInsertError') {
+    return '📅 Calendar não respondeu agora. Tenta de novo daqui a pouco.';
+  }
+  if (error?.code?.startsWith?.('PGRST') || /supabase/i.test(error?.message || '')) {
+    return '🗄️ Banco fora do ar. Tenta de novo daqui a pouco.';
+  }
+  return 'Ei, estou aqui! Tive um probleminha técnico agora. Pode repetir? 💜';
 }
 
 // ─────────────────────────────────────────────
@@ -594,4 +627,4 @@ Carol enviou uma imagem. Analise visualmente e responda de forma útil, conectan
   }
 }
 
-module.exports = { think, thinkWithImage };
+module.exports = { think, thinkWithImage, classifyBrainError };
