@@ -314,14 +314,6 @@ async function think(message, chatId = null) {
       return resp;
     }
 
-    // Passo 0a: check-in / bom dia → responde direto sem gastar API de análise
-    if (lower === 'checkin' || lower === 'check-in' || lower === 'check in' || lower === 'bom dia' || lower === 'bom dia!') {
-      const checkinMsg = gerarCheckin();
-      await addMessage('user', message);
-      await addMessage('assistant', checkinMsg);
-      return checkinMsg;
-    }
-
     // Passo 0b: tenta parsear resposta de check-in (ex: "3 2 4 1")
     const checkinMatch = lower.match(/^(\d)\s+(\d)\s+(\d)\s+(\d)$/);
     if (checkinMatch) {
