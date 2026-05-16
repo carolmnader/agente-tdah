@@ -12,6 +12,8 @@ const supabase = createClient(
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const { detectarContradicao } = require('./detectorContradicao');
+
 // ━━━ MEMÓRIAS (preferências, fatos, padrões) ━━━
 
 async function salvarMemoria(categoria, chave, valor, contexto = null) {
@@ -37,10 +39,67 @@ async function salvarMemoria(categoria, chave, valor, contexto = null) {
   }
 }
 
+/**
+ * Salva fato novo COM trilha de auditoria. Usado pelo extrator de fatos.
+ * Diferente de salvarMemoria (UPSERT destrutivo), esta função:
+ *  1. INSERT do fato novo (sempre cria nova linha)
+ *  2. Busca antigas ativas da mesma categoria
+ *  3. Haiku judge detecta contradições semânticas
+ *  4. UPDATE nas antigas contraditas: superseded_at + superseded_by_id
+ * Conservador: em erro, comportamento é INSERT puro sem marcar nada.
+ */
+async function salvarMemoriaComHistorico(categoria, chave, valor, contexto = null) {
+  // 1. INSERT do fato novo
+  const { data: novaMemoria, error: insertError } = await supabase
+    .from('memorias')
+    .insert({ categoria, chave, valor, contexto })
+    .select('id')
+    .single();
+
+  if (insertError) {
+    console.error('Erro ao inserir nova memória:', insertError.message);
+    return;
+  }
+
+  // 2. Busca antigas ATIVAS da mesma categoria
+  // buscarMemorias já filtra superseded_at IS NULL (Fase B)
+  const antigas = await buscarMemorias(categoria, 10);
+  const candidatas = antigas.filter(m => m.id !== novaMemoria.id);
+
+  if (candidatas.length === 0) return; // primeira da categoria
+
+  // 3. Haiku judge
+  const idsContraditos = await detectarContradicao(
+    { categoria, chave, valor, contexto },
+    candidatas
+  );
+
+  if (idsContraditos.length === 0) return;
+
+  // 4. Marca as antigas como superseded
+  const { error: updateError } = await supabase
+    .from('memorias')
+    .update({
+      superseded_at: new Date().toISOString(),
+      superseded_by_id: novaMemoria.id
+    })
+    .in('id', idsContraditos);
+
+  if (updateError) {
+    console.error('Erro ao marcar memórias supersededs:', updateError.message);
+  }
+}
+
+/**
+ * Lista memórias ATIVAS (não supersededs) ordenadas por updated_at desc.
+ * Para incluir memórias supersededs (auditoria, contradição), use SQL raw
+ * ou buscarMemoriaPorChave.
+ */
 async function buscarMemorias(categoria = null, limite = 50) {
   let query = supabase
     .from('memorias')
     .select('*')
+    .is('superseded_at', null)
     .order('updated_at', { ascending: false })
     .limit(limite);
 
@@ -249,7 +308,7 @@ Extraia SOMENTE fatos novos/relevantes. Se não houver nada novo, retorne {"fato
     // Salva fatos
     if (dados.fatos?.length > 0) {
       for (const f of dados.fatos) {
-        await salvarMemoria(f.categoria, f.chave, f.valor, f.contexto);
+        await salvarMemoriaComHistorico(f.categoria, f.chave, f.valor, f.contexto);
       }
       console.log(`🧠 [Memória] ${dados.fatos.length} fato(s) salvo(s)`);
     }
@@ -487,6 +546,7 @@ async function getMemorySummary() {
 module.exports = {
   // Novas funções Supabase
   salvarMemoria,
+  salvarMemoriaComHistorico,
   buscarMemorias,
   buscarMemoriaPorChave,
   salvarMensagem,
