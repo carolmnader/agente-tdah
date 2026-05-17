@@ -140,9 +140,35 @@ async function test5_multiplasAntigasUmaSoMarcada() {
   console.log('  ✅ apenas a antiga contradita foi marcada');
 }
 
+async function test6_sameKeyAutoSupersede() {
+  console.log('Test 6: Same-key auto-supersede marca mesma (categoria, chave)');
+  await cleanup();
+
+  // Insere 2 antigas com chave 'yoga' + 1 antiga com chave diferente
+  await supabase.from('memorias').insert([
+    { categoria: TEST_CATEGORIA, chave: 'yoga', valor: 'fez yoga 30 min ontem' },
+    { categoria: TEST_CATEGORIA, chave: 'yoga', valor: 'pretende voltar essa semana' },
+    { categoria: TEST_CATEGORIA, chave: 'sono', valor: 'dormiu mal essa noite' }
+  ]);
+
+  detectorMock.fakeContradicoes = []; // Haiku NÃO detecta nada
+
+  await salvarMemoriaComHistorico(TEST_CATEGORIA, 'yoga', 'fez yoga hoje cedo', null);
+
+  const ativos = await getAtivos();
+  const supersededs = (await getTudo()).filter(m => m.superseded_at !== null);
+
+  assert(ativos.length === 2, `deveria ter 2 ativos (sono + nova yoga), tem ${ativos.length}`);
+  assert(ativos.find(m => m.chave === 'sono'), 'sono deveria continuar ativo');
+  assert(ativos.find(m => m.valor === 'fez yoga hoje cedo'), 'nova yoga deveria estar ativa');
+  assert(supersededs.length === 2, `deveria ter 2 supersededs (yogas antigas), tem ${supersededs.length}`);
+  assert(supersededs.every(m => m.chave === 'yoga'), 'só yogas antigas deveriam estar obsoletas');
+  console.log('  ✅ same-key auto-supersede marcou antigas com mesma chave');
+}
+
 async function run() {
   let passed = 0, failed = 0;
-  const tests = [test1_contradicaoDireta, test2_naoContradicao, test3_primeiraMemoria, test4_buscarMemoriasFiltra, test5_multiplasAntigasUmaSoMarcada];
+  const tests = [test1_contradicaoDireta, test2_naoContradicao, test3_primeiraMemoria, test4_buscarMemoriasFiltra, test5_multiplasAntigasUmaSoMarcada, test6_sameKeyAutoSupersede];
 
   for (const test of tests) {
     try {

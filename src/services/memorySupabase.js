@@ -43,7 +43,9 @@ async function salvarMemoria(categoria, chave, valor, contexto = null) {
  * Salva fato novo COM trilha de auditoria. Usado pelo extrator de fatos.
  * Diferente de salvarMemoria (UPSERT destrutivo), esta função:
  *  1. INSERT do fato novo (sempre cria nova linha)
- *  2. Busca antigas ativas da mesma categoria
+ *  1.5. Same-key auto-supersede: outras ativas com mesma (categoria, chave)
+ *       viram obsoletas imediatamente
+ *  2. Busca antigas ativas da mesma categoria (chaves diferentes)
  *  3. Haiku judge detecta contradições semânticas
  *  4. UPDATE nas antigas contraditas: superseded_at + superseded_by_id
  * Conservador: em erro, comportamento é INSERT puro sem marcar nada.
@@ -59,6 +61,24 @@ async function salvarMemoriaComHistorico(categoria, chave, valor, contexto = nul
   if (insertError) {
     console.error('Erro ao inserir nova memória:', insertError.message);
     return;
+  }
+
+  // 1.5. Same-key auto-supersede
+  // Mesma (categoria, chave) é ponteiro canônico — antigas viram
+  // histórico automaticamente, sem depender do Haiku judge.
+  const { error: sameKeyError } = await supabase
+    .from('memorias')
+    .update({
+      superseded_at: new Date().toISOString(),
+      superseded_by_id: novaMemoria.id
+    })
+    .eq('categoria', categoria)
+    .eq('chave', chave)
+    .neq('id', novaMemoria.id)
+    .is('superseded_at', null);
+
+  if (sameKeyError) {
+    console.error('Erro em same-key auto-supersede:', sameKeyError.message);
   }
 
   // 2. Busca antigas ATIVAS da mesma categoria
