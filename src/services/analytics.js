@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const Anthropic = require('@anthropic-ai/sdk');
 const { getFaseLunarLocal } = require('../integrations/astrology');
+const { SYSTEM_PROMPT } = require('../prompts/system');
 require('dotenv').config();
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -125,26 +126,31 @@ const gerarRelatorioIA = async (padroes, tipo = 'semanal') => {
   const resp = await anthropic.messages.create({
     model: 'claude-opus-4-5',
     max_tokens: 800,
+    system: SYSTEM_PROMPT,
     messages: [{
       role: 'user',
-      content: `Você é a ARIA analisando os padrões de comportamento da Carol com TDAH.
+      content: `Você está gerando um RELATÓRIO ${tipo} pra Carol no Telegram (mensagem proativa).
 
 DADOS DOS ÚLTIMOS ${padroes.periodo_dias} DIAS:
 ${JSON.stringify(padroes, null, 2)}
 
-Gere um relatório ${tipo} para o Telegram com:
+FONTES (CRÍTICO — não inventar):
+- FATOS: contagens, datas e números literalmente presentes nos dados acima. Cite com precisão ("20 das 34 mensagens foram entre 11h-12h").
+- BUCKETS VAZIOS: se um dia-da-semana, categoria ou métrica tem 0 entradas nos dados, NUNCA invente comportamento pra ele. Diga "sem registro" ou simplesmente não mencione. NUNCA aglutine dias ("Domingo e sábado foram dias de X") quando só UM deles tem registro — confira antes de juntar.
+- HIPÓTESES vs FATOS: se interpretar o que um número SIGNIFICA, marque como hipótese ("isso PODE ser X — você nota?"). NUNCA apresente interpretação como fato. Carol decide o significado, não você.
+- PADRÕES exigem 3+ ocorrências distintas. ${padroes.periodo_dias <= 7 ? 'UMA SEMANA é observação, não padrão. ' : ''}Nunca diga "X funciona como Y pra você" baseado em 1-2 observações. Diga "essa janela X aconteceu Y vezes" em vez de "padrão de X aparecendo".
+- HUMOR DOMINANTE: só fale de "humor dominante" se houver 3+ registros do MESMO humor no período. Menos que isso, cite ocorrências concretas com data ("registrou 'animada' em 16/05") sem agregar.
 
-1. 2-3 INSIGHTS mais importantes (padrões que Carol provavelmente não percebe)
-2. 1 VITÓRIA para celebrar (algo positivo nos dados)
-3. 1 SUGESTÃO específica e pequena para melhorar
+ESTRUTURA do relatório:
+1. 2-3 OBSERVAÇÕES factuais com números reais (sem fechar interpretação)
+2. 1 VITÓRIA concreta (positivo com número específico)
+3. 1 SUGESTÃO pequena e específica
+4. 1 PERGUNTA que convida Carol a interpretar — sem ARIA fechar o sentido
 
 REGRAS:
 - Use HTML do Telegram: <b>negrito</b>, <i>itálico</i>
-- Seja calorosa, específica e sem julgamento
-- Cite números reais dos dados
 - Máximo 25 linhas
-- Tom de amiga inteligente que te conhece bem
-- Termine com uma pergunta ou ação
+- Tom honesto e específico, sem julgamento, sem bajulação
 
 Gere APENAS o relatório, sem explicações extras.`
     }]
