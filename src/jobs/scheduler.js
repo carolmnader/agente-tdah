@@ -10,6 +10,7 @@ const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/ana
 const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt, buscarAprendizadosNaoNotificados, marcarComoNotificadas } = require('../services/hipoteses');
 const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
 const { proporSugestao } = require('../services/sugestoes');
+const { snapshotMatinal } = require('../services/oura');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT } = require('../prompts/system');
 
@@ -27,6 +28,7 @@ TIPO: ${contexto.tipo}
 CONTEXTO: ${JSON.stringify(contexto.dados)}
 
 FONTES (CRÍTICO — não inventar):
+- oura_corpo (DADOS BIOMÉTRICOS REAIS DO ANEL OURA, PRIORIDADE ABSOLUTA quando presente): contém sono (score, total_sleep_min, deep_sleep_min, rem_sleep_min, efficiency), readiness (score, temperature_deviation_c, hrv_balance, resting_heart_rate), atividade (steps, score), stress (stress_high_seconds, day_summary), workouts (array de atividades detectadas). Trate como observação primária do corpo da Carol HOJE. Use os números literalmente quando relevantes (ex: "dormiu 6h13, score 62, temperatura +0.3°C do baseline"). Ancore a observação inicial neles antes de qualquer outra fonte. Se ausente ou null, PULE esta fonte sem mencionar. NUNCA invente leituras que não estão literalmente nos dados.
 - FACTUAIS (verdade se presentes, NÃO invente se vazias): agenda_do_dia, aniversarios_proximos, humor_3_dias. Só mencione o que está literalmente nestas chaves.
 - tarefas_pendentes: são reais (vêm do Supabase) mas NÃO são agenda — trate como "fazer se der tempo", nunca como compromissos do dia.
 - CONTEXTUAIS (pano de fundo, NÃO são agenda): memorias_relevantes, hipoteses_ativas. Use como observação ou cor, nunca como compromisso de hoje.
@@ -75,6 +77,12 @@ const jobBriefingMatinal = async () => {
     const hipoteses = await hipotesesParaPrompt(5);
     const aprendizadosRecentes = await buscarAprendizadosNaoNotificados(3);
 
+    // Oura: dados biometricos reais (corpo factual)
+    const ouraCorpo = await snapshotMatinal().catch(e => {
+      console.log('🟡 [Briefing] Oura snapshot falhou:', e.message);
+      return null;
+    });
+
     const numEventos = (agendaLimpa.match(/⏰/g) || []).length;
     const agendaPesada = numEventos > 4;
 
@@ -98,6 +106,7 @@ const jobBriefingMatinal = async () => {
         aniversarios_proximos: aniversarios,
         hipoteses_ativas: hipoteses,
         aprendizados_recentes: aprendizadosRecentes,
+        oura_corpo: ouraCorpo,
         sugestao: agendaPesada ? 'Sugerir deixar agenda mais leve' : 'Encorajar o dia'
       }
     });
