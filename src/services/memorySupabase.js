@@ -294,6 +294,31 @@ async function salvarHumor(humor, energia = null, contexto = null) {
   if (error) console.error('Erro ao salvar humor:', error.message);
 }
 
+/**
+ * Busca registros recentes de humor_log com hora e contexto formatados.
+ * Calibrado pela REGRA HUMOR — entradas refletem autorreporte real, nao inferencia.
+ * Usado por jobResumoNoturno e analise pra dar dado factual ao Opus.
+ */
+async function buscarHumorRecente(horasAtras = 24) {
+  const desde = new Date(Date.now() - horasAtras * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from('humor_log')
+    .select('humor, created_at, contexto')
+    .gte('created_at', desde)
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('Erro ao buscar humor recente:', error.message);
+    return [];
+  }
+  return (data || []).map(h => ({
+    humor: h.humor,
+    hora: new Date(h.created_at).toLocaleTimeString('pt-BR', {
+      hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo'
+    }),
+    origem: (h.contexto || '').substring(0, 50)
+  }));
+}
+
 // ━━━ EXTRAÇÃO AUTOMÁTICA DE FATOS ━━━
 
 const SYSTEM_EXTRATOR = `Você é o extrator de memória da ARIA. Sua missão: identificar fatos sobre a Carol que valham a pena lembrar, usando CHAVES CANÔNICAS estáveis por tópico, nunca inventando chaves novas quando uma canônica existe.
@@ -605,7 +630,6 @@ async function addMessage(role, content) {
   // Supabase
   const humor = detectarHumor(content);
   await salvarMensagem(role, content, { humor });
-  if (humor && role === 'user') await salvarHumor(humor, null, content.substring(0, 100));
 
   // JSON local (compatibilidade)
   const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
@@ -661,6 +685,7 @@ module.exports = {
   buildMemoryContext,
   detectarHumor,
   salvarHumor,
+  buscarHumorRecente,
   salvarAcaoPendente,
   buscarAcaoPendente,
   limparAcaoPendente,

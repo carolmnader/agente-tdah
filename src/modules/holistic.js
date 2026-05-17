@@ -98,17 +98,26 @@ function getRespostaIFS(parte) {
 }
 
 // ━━━ MODO EMERGÊNCIA ━━━
-const PALAVRAS_EMERGENCIA = [
-  'não aguento', 'quero morrer', 'desisto', 'não consigo mais',
-  'tô desesperada', 'surto', 'pânico', 'ataque de pânico',
-  'não vejo saída', 'socorro', 'me ajuda', 'tô mal demais',
-  'crise', 'emergência', 'não tô bem', 'quero sumir',
-  'tô travada', 'paralisia', 'shutdown', 'burnout',
+const PADROES_EMERGENCIA = [
+  /quero morrer/i,
+  /quero sumir/i,
+  /quero acabar com tudo/i,
+  /n[aã]o aguento mais/i,
+  /n[aã]o consigo mais/i,
+  /n[aã]o vejo sa[ií]da/i,
+  /t[oôõ] desesperada/i,
+  /t[oôõ] em p[aâ]nico/i,
+  /t[oôõ] em crise/i,
+  /t[oôõ] tendo (um )?ataque de p[aâ]nico/i,
+  /ataque de p[aâ]nico (agora|come[cç]ando|chegando)/i,
+  /t[oôõ] mal demais/i,
+  /preciso de socorro/i,
+  /me socorre/i,
+  /isso [eé] uma emerg[eê]ncia/i,
 ];
 
 function isEmergencia(texto) {
-  const lower = texto.toLowerCase();
-  return PALAVRAS_EMERGENCIA.some(p => lower.includes(p));
+  return PADROES_EMERGENCIA.some(p => p.test(texto));
 }
 
 function getModoEmergencia() {

@@ -2,7 +2,7 @@
 // usa 'America/Sao_Paulo' (pós-Bug #5). Alinhar todos pra Sao_Paulo em sessão futura.
 const cron = require('node-cron');
 const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient, buscarEventosTodos } = require('../integrations/calendar');
-const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria } = require('../services/memorySupabase');
+const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria, buscarHumorRecente } = require('../services/memorySupabase');
 const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buscarAniversariosProximos } = require('../services/crm');
@@ -230,7 +230,10 @@ const jobResumoNoturno = async () => {
     const agendaLimpa = agenda.replace(/<[^>]*>/g, '');
 
     const mensagensHoje = historico.filter(h => h.role === 'user').length;
-    const humoresHoje = historico.filter(h => h.humor).map(h => h.humor);
+
+    // Humor: ler humor_log REAL (calibrado pela REGRA HUMOR), nao inferir
+    // de mensagens.humor (regex permissiva que gerava contagens infladas).
+    const humoresHoje = await buscarHumorRecente(24);
 
     const msg = await gerarMensagemProativa({
       tipo: 'resumo_noturno',
