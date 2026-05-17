@@ -333,6 +333,28 @@ REGRAS DE CHAVE:
 3. O VALOR carrega o estado atual; a chave é o ponteiro permanente.
    Se Carol mudou de opinião, mude o VALOR — a chave continua a mesma.
 
+REGRA HUMOR — CRÍTICO (não inferir além do que ela disse):
+
+humor_detectado SÓ tem valor não-null quando a mensagem da Carol contém AUTORREPORTE EMOCIONAL EXPLÍCITO sobre o estado dela AGORA.
+
+Autorreporte explícito (humor preenchido):
+- "to ansiosa" → ansiosa
+- "me sinto travada" → travada
+- "tô empolgada" → animada
+- "cansada hoje" → cansada
+- "tô bem" com tom positivo claro → calma
+
+NÃO é autorreporte (humor=null):
+- Falar SOBRE emoção como tópico ("padrão de ansiedade", "comentar com psicólogo sobre X") → null
+- Frases neutras de descarte ("Nada", "Tá bem", "5", "ok", "sim") → null
+- Refletir sobre comportamento sem declarar estado ("não tenho feito X e isso me incomoda") → null
+- Mensagens factuais sobre o dia ("fiz yoga 40 min", "voltei pra casa") → null
+- Falar sobre observação de padrão próprio ("percebi que faço X") → null
+
+EXCEÇÃO: empolgação clara em conquista pode marcar animada ("voltei a fazer yoga!", "consegui!", "deu certo!"). Só se tom inequívoco.
+
+EM DÚVIDA, retorne null. Falso null é melhor que falso humor — humor inferido errado vira ruído no briefing e quebra confiança da Carol.
+
 EXEMPLOS:
 
 Mensagem: "Não tenho feito yoga há semanas e isso me incomoda."
