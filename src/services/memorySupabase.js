@@ -276,27 +276,85 @@ async function salvarHumor(humor, energia = null, contexto = null) {
 
 // ━━━ EXTRAÇÃO AUTOMÁTICA DE FATOS ━━━
 
+const SYSTEM_EXTRATOR = `Você é o extrator de memória da ARIA. Sua missão: identificar fatos sobre a Carol que valham a pena lembrar, usando CHAVES CANÔNICAS estáveis por tópico, nunca inventando chaves novas quando uma canônica existe.
+
+CATEGORIAS (use SOMENTE estas):
+- saude        → corpo, prática física, terapia, medicação, sintomas, diagnóstico
+- rotina       → hábitos, horários recorrentes, ritmos do dia
+- preferencia  → gostos, valores, modos de fazer, estilo
+- trabalho     → empresa, função, projetos, ferramentas, clientes
+- meta         → intenções, planos de futuro, desejos declarados
+- emocao       → estados emocionais nomeados
+- pessoa       → identidade de terceiros (nomes, relações, atributos)
+
+CHAVES CANÔNICAS — use SEMPRE estas quando o tópico aparecer:
+
+saude: yoga, exercicio, alimentacao, sono, agua, medicacao, psicologo, psiquiatra, terapia, diagnostico_tdah, sintoma_X
+rotina: horario_acordar, horario_dormir, manha, tarde, noite, fim_de_semana, ritual_X
+preferencia: comida, musica, leitura, ambiente_trabalho, comunicacao, decisao, ritmo, lente_X
+trabalho: empresa, funcao, software_principal, projeto_atual, cliente_X, parceiro_X
+meta: objetivo_curto, objetivo_medio, objetivo_longo, plano_X
+emocao: estado_atual, padrao_X
+pessoa: nome_X, relacao_X, atributo_X
+
+REGRAS DE CHAVE:
+
+1. Se o tópico existe na lista canônica, USE essa chave EXATA.
+   "Voltou a fazer yoga essa semana" → chave: "yoga"
+   "Está sem fazer yoga há semanas" → chave: "yoga" (mesma!)
+
+2. Se o tópico é genuinamente novo e não tem chave canônica:
+   - use snake_case curto, substantivo do tópico, SEM adjetivos
+   - SEM verbos ("pratica_X", "fez_X" são proibidos)
+   - SEM datas ou números na chave
+   - Errado: "pratica_yoga", "yoga_35min", "retomou_yoga"
+   - Certo: "yoga"
+
+3. O VALOR carrega o estado atual; a chave é o ponteiro permanente.
+   Se Carol mudou de opinião, mude o VALOR — a chave continua a mesma.
+
+EXEMPLOS:
+
+Mensagem: "Não tenho feito yoga há semanas e isso me incomoda."
+ERRADO: {"categoria": "rotina", "chave": "pulou_yoga_semanas", "valor": "está sem fazer há semanas"}
+CERTO:  {"categoria": "saude", "chave": "yoga", "valor": "está sem praticar há semanas, sente incômodo"}
+
+Mensagem: "Voltei a fazer yoga essa semana, segunda e quarta."
+CERTO:  {"categoria": "saude", "chave": "yoga", "valor": "voltou a praticar esta semana, fez segunda e quarta"}
+
+Mensagem: "Meu psicólogo se chama Claudecy."
+CERTO:  [
+  {"categoria": "saude", "chave": "psicologo", "valor": "faz acompanhamento, psicólogo se chama Claudecy"},
+  {"categoria": "pessoa", "chave": "nome_claudecy", "valor": "psicólogo da Carol"}
+]
+
+Mensagem: "Tô usando Archicad no projeto Doutorama."
+CERTO:  [
+  {"categoria": "trabalho", "chave": "software_principal", "valor": "Archicad"},
+  {"categoria": "trabalho", "chave": "projeto_atual", "valor": "Doutorama"}
+]
+
+PRINCÍPIO FINAL: chave estável + valor que evolui = memória que não fragmenta.`;
+
 async function extrairEsalvarFatos(mensagem, resposta) {
   try {
     const result = await anthropic.messages.create({
       model: 'claude-opus-4-5',
-      max_tokens: 300,
+      max_tokens: 600,
+      system: SYSTEM_EXTRATOR,
       messages: [{
         role: 'user',
-        content: `Analise esta conversa e extraia fatos importantes sobre a Carol para lembrar depois. Responda APENAS com JSON válido.
-
-Mensagem da Carol: "${mensagem}"
+        content: `Mensagem da Carol: "${mensagem}"
 Resposta da ARIA: "${resposta.substring(0, 200)}"
 
-Extraia SOMENTE fatos novos/relevantes. Se não houver nada novo, retorne {"fatos":[]}.
+Extraia SOMENTE fatos novos ou que atualizam algo conhecido. Se nada relevante, retorne {"fatos":[]}.
 
+Responda APENAS com JSON válido:
 {
   "fatos": [
-    {"categoria": "preferencia|saude|rotina|emocao|pessoa|trabalho|meta", "chave": "descricao_curta", "valor": "detalhe", "contexto": "como soube"}
+    {"categoria": "...", "chave": "...", "valor": "...", "contexto": "como soube"}
   ],
-  "pessoas_mencionadas": [
-    {"nome": "string", "relacionamento": "string|null"}
-  ],
+  "pessoas_mencionadas": [{"nome": "...", "relacionamento": "..."}],
   "humor_detectado": "ansiosa|cansada|animada|triste|travada|estressada|calma|null"
 }`
       }]
