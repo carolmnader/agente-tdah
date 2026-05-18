@@ -83,6 +83,13 @@ const RE_CONSULTA_FORTE = /^\s*(que horas|a que horas|quando)\b/i;
 const RE_CONSULTA_TEM = /^\s*(tem|tenho)\b/i;
 const RE_FALSO_POSITIVO_TEM = /^\s*(tenho que|tenho de|tem que|tem de|tenho um\b|tenho uma\b|tenho mil|tenho (ideia|vontade|certeza|raiva|medo|fome|sono)|tem (gente|alguém|alguem|algo|comida|certeza|jeito|ideia))/i;
 
+// Onda 1.6 commit 1.5: declarativos de disponibilidade/estado/sentimento/negacao
+// que comecam com "tenho" mas NAO sao consulta de evento.
+// Bug 12:09 18/05: "Tenho ate as 17h livre. Depois quero..." virava
+// consultar_evento(termo="ate as 17h livre"). Precisa bypass.
+// Preserva consultas legitimas ("tenho psicologo amanha", "tenho almoco quinta").
+const RE_FALSO_POSITIVO_TEM_ESTADO = /^\s*(n[aã]o\s+tenho\b|tenho\s+at[eé]\b|tenho\s+\w+\s+livre\b|tenho\s+(tempo|sede|preguic[ca]|saudade|raz[aã]o|d[uú]vida|duvida))\b/i;
+
 // Onda 1.6 Opção C: bypass do Opus pra declarações de fato passado.
 // Frase começando com "Não fui/fiz/consegui/...", "Esqueci", "Cheguei tarde",
 // "Perdi", "Faltei" NÃO é intent de Calendar — é contexto narrativo. Combinada
@@ -106,7 +113,9 @@ function preClassificarConsulta(msg) {
   if (!msg) return null;
   const m = String(msg).trim();
   const ehForte = RE_CONSULTA_FORTE.test(m);
-  const ehTem = RE_CONSULTA_TEM.test(m) && !RE_FALSO_POSITIVO_TEM.test(m);
+  const ehTem = RE_CONSULTA_TEM.test(m)
+    && !RE_FALSO_POSITIVO_TEM.test(m)
+    && !RE_FALSO_POSITIVO_TEM_ESTADO.test(m);
   if (!ehForte && !ehTem) return null;
   const termo = extrairTermoConsulta(m);
   if (!termo) return null;
