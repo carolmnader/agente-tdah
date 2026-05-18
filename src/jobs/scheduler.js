@@ -10,6 +10,7 @@ const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/ana
 const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt, buscarAprendizadosNaoNotificados, marcarComoNotificadas } = require('../services/hipoteses');
 const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
 const { proporSugestao } = require('../services/sugestoes');
+const { tentarMarcarNotificado, limparAntigos } = require('../services/eventosNotificados');
 const { snapshotMatinal } = require('../services/oura');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
@@ -198,18 +199,31 @@ const jobPreEvento = async () => {
         );
 
         for (const evento of eventos) {
+          // Dedup atomico: so notifica se for 1a vez pra este evento.id+tipo
+          const deveNotificar = await tentarMarcarNotificado(evento.id, 'pre_evento_30min');
+          if (!deveNotificar) {
+            console.log(`[Scheduler] Evento ${evento.id} ja notificado, pulando.`);
+            continue;
+          }
+
+          // Defesa em profundidade: all-day events (sem dateTime) ficam fora de "em X min"
+          if (!evento.start?.dateTime) continue;
+
+          const startMs = new Date(evento.start.dateTime).getTime();
+          const minutosReais = Math.max(0, Math.round((startMs - agora.getTime()) / 60000));
           const hora = new Date(evento.start.dateTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+
           const msg = await gerarMensagemProativa({
             tipo: 'pre_evento',
             dados: {
               evento: evento.summary,
               hora: hora,
-              em_minutos: 30,
+              em_minutos: minutosReais,
               local: evento.location || 'não especificado'
             }
           });
           await sendTelegramMessage(CAROL_CHAT_ID, msg);
-          console.log(`[Scheduler] ✅ Lembrete pré-evento: ${evento.summary}`);
+          console.log(`[Scheduler] ✅ Lembrete pré-evento: ${evento.summary} (em ${minutosReais}min)`);
         }
       } catch(e) {
         // Silencia erro de calendário individual
@@ -340,6 +354,9 @@ const jobRelatorioMensal = async () => {
 const jobAnaliseNoturna = async () => {
   console.log('🌙 [Cron noturno] Iniciando análise...');
   try {
+    // Cleanup nightly: remove notificacoes antigas (>48h) da tabela eventos_notificados
+    const limpos = await limparAntigos();
+    console.log(`[Cron noturno] Eventos notificados antigos (>48h) removidos: ${limpos}`);
     const decaimento = await aplicarDecaimentoGlobal();
     console.log(`🌙 Decaimento aplicado em ${decaimento} hipóteses`);
     const resultado = await analisarNoturno();
