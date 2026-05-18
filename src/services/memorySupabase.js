@@ -168,6 +168,7 @@ async function buscarHistorico(limite = 20) {
   return (data || []).reverse().map(m => ({
     role: m.role,
     content: m.content,
+    created_at: m.created_at,
   }));
 }
 
@@ -622,7 +623,7 @@ async function getHistory() {
   const MEMORY_FILE = path.join(process.cwd(), 'data', 'memory.json');
   try {
     const mem = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf-8'));
-    return (mem.conversations || []).map(m => ({ role: m.role, content: m.content }));
+    return (mem.conversations || []).map(m => ({ role: m.role, content: m.content, created_at: m.created_at || m.timestamp }));
   } catch { return []; }
 }
 

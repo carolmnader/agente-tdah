@@ -532,7 +532,18 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
 
     const agora = new Date();
     const diasSemana = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
-    const historicoTexto = historico.slice(-8)
+    // Onda 1.6 Opção A: filtro temporal de 15min no histórico.
+    // Mensagens mais antigas não contam como contexto vizinho (evita Opus
+    // inferir continuidade de conversa terminada 1h+ atrás). ts === null
+    // fallback defensivo: paylod sem created_at NÃO crasha, segue passando.
+    const QUINZE_MIN_MS = 15 * 60 * 1000;
+    const agoraMs = Date.now();
+    const historicoRecente = historico.filter(m => {
+      const ts = m.created_at ? new Date(m.created_at).getTime() : null;
+      return ts === null || (agoraMs - ts) <= QUINZE_MIN_MS;
+    });
+
+    const historicoTexto = historicoRecente.slice(-8)
       .map(m => `${m.role === 'user' ? 'Carol' : 'ARIA'}: ${m.content?.substring(0, 120)}`)
       .join('\n');
 
