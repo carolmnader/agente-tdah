@@ -151,7 +151,7 @@ function chooseStrategy(analysis) {
 // PASSO 3 — Gera a resposta final
 // ─────────────────────────────────────────────
 async function generateResponse(message, analysis, strategy, memorySummary, pessoasInfo = {}) {
-  const { SYSTEM_PROMPT } = require('../prompts/system');
+  const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
 
   const evolvedAdditions = loadEvolvedPrompt();
   const carolProfile = loadCarolProfile();
@@ -262,7 +262,7 @@ Nota interna: ${analysis.thinking_note}`;
     ],
   });
 
-  return response.content[0].text;
+  return normalizarTratamento(response.content[0].text);
 }
 
 // ─────────────────────────────────────────────
@@ -563,7 +563,7 @@ function classifyBrainError(error) {
 // ─────────────────────────────────────────────
 async function thinkWithImage(message, imageContent) {
   try {
-    const { SYSTEM_PROMPT } = require('../prompts/system');
+    const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
     const evolvedAdditions = loadEvolvedPrompt();
     const carolProfile = loadCarolProfile();
     const memorySummary = await getMemorySummary();
@@ -603,7 +603,7 @@ Carol enviou uma imagem. Analise visualmente e responda de forma útil, conectan
       ],
     });
 
-    const ariaResponse = response.content[0].text;
+    const ariaResponse = normalizarTratamento(response.content[0].text);
 
     await addMessage('user', `[Imagem] ${message}`);
     await addMessage('assistant', ariaResponse);

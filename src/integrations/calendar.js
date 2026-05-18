@@ -471,7 +471,7 @@ const cancelarEvento = async (termoBusca) => {
         txt += `${i+1}️⃣ ${info.emoji} ${ev.summary} — ${formatarDiaSemana(d)} ${h}\n`;
       });
       txt += '\nResponde com o número.';
-      return { multiplos: true, texto: txt, eventos };
+      return txt;
     }
 
     const ev = eventos[0];

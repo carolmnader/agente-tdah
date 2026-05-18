@@ -1,7 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const Anthropic = require('@anthropic-ai/sdk');
 const { getFaseLunarLocal } = require('../integrations/astrology');
-const { SYSTEM_PROMPT } = require('../prompts/system');
+const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
 require('dotenv').config();
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -156,7 +156,7 @@ Gere APENAS o relatório, sem explicações extras.`
     }]
   });
 
-  return resp.content[0].text;
+  return normalizarTratamento(resp.content[0].text);
 };
 
 const gerarRelatorioSemanal = async () => {

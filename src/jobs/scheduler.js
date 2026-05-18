@@ -12,7 +12,7 @@ const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturn
 const { proporSugestao } = require('../services/sugestoes');
 const { snapshotMatinal } = require('../services/oura');
 const Anthropic = require('@anthropic-ai/sdk');
-const { SYSTEM_PROMPT } = require('../prompts/system');
+const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -49,7 +49,7 @@ Gere APENAS a mensagem, sem explicações.`;
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
   });
-  return resp.content[0].text;
+  return normalizarTratamento(resp.content[0].text);
 };
 
 // ─── JOB 1: BRIEFING MATINAL — todo dia às 7h ────────────────────────────────

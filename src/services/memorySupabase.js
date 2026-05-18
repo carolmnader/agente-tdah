@@ -276,6 +276,7 @@ async function buscarPessoa(termo) {
 // ━━━ HUMOR ━━━
 
 function detectarHumor(texto) {
+  if (typeof texto !== 'string') return null;
   const t = texto.toLowerCase();
   if (/ansiosa|ansiedade|nervosa|preocupada|apreensiva|inquieta|agitada/i.test(t)) return 'ansiosa';
   if (/cansada|exausta|sem energia|esgotada|morta|acabada|dormindo/i.test(t)) return 'cansada';
