@@ -83,6 +83,14 @@ const RE_CONSULTA_FORTE = /^\s*(que horas|a que horas|quando)\b/i;
 const RE_CONSULTA_TEM = /^\s*(tem|tenho)\b/i;
 const RE_FALSO_POSITIVO_TEM = /^\s*(tenho que|tenho de|tem que|tem de|tenho um\b|tenho uma\b|tenho mil|tenho (ideia|vontade|certeza|raiva|medo|fome|sono)|tem (gente|alguém|alguem|algo|comida|certeza|jeito|ideia))/i;
 
+// Onda 1.6 Opção C: bypass do Opus pra declarações de fato passado.
+// Frase começando com "Não fui/fiz/consegui/...", "Esqueci", "Cheguei tarde",
+// "Perdi", "Faltei" NÃO é intent de Calendar — é contexto narrativo. Combinada
+// com RE_VERBO_IMPERATIVO_CALENDAR pra preservar frases compostas
+// ("Não fui ao mercado. Agenda pra amanhã" → tem verbo imperativo → segue).
+const RE_FATO_PASSADO = /^\s*(n[aã]o\s+(fui|fiz|consegui|deu|cheguei|tive)|cheguei\s+tarde|esqueci|perdi|faltei)\b/i;
+const RE_VERBO_IMPERATIVO_CALENDAR = /\b(cancela|cancelar|desmarca|desmarcar|tira|tirar|remove|adiciona|adicionar|marca|marcar|agenda|agendar|reagenda|reagendar|muda|mudar|move|mover|coloca|p[oõ]e|bota)\b/i;
+
 function extrairTermoConsulta(msg) {
   let t = String(msg || '').trim()
     .replace(/[?!.]+$/, '')
@@ -398,6 +406,14 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   try {
     const mem = global.ariaMemoria;
     const msgL = mensagem.toLowerCase();
+
+    // Onda 1.6 Opção C: bypass do Opus quando mensagem é fato passado SEM
+    // verbo imperativo de Calendar. Evita interpretar "Não fui pro exercício"
+    // como intent de cancelar.
+    if (RE_FATO_PASSADO.test(mensagem) && !RE_VERBO_IMPERATIVO_CALENDAR.test(mensagem)) {
+      console.log(`📅 [CalendarBrain] Fato passado detectado, bypass Opus: "${mensagem.substring(0, 60)}"`);
+      return null;
+    }
 
     // Resolve ação pendente (sim/não) — persistida no Supabase, expira em 5 min
     const pendente = await buscarAcaoPendente(chatId);
@@ -752,4 +768,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta };
+module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, RE_FATO_PASSADO, RE_VERBO_IMPERATIVO_CALENDAR };
