@@ -404,6 +404,68 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
     if (pendente) {
       const pos = /^(sim|confirmo|pode|ok|beleza|vai|faz|manda|confirma|isso|uhum|claro|com certeza)\b/i;
       const neg = /^(n[aã]o|cancela|deixa|esquece|para|pera|espera|melhor n[aã]o)\b/i;
+
+      // Handler especifico: seleção de evento pra cancelar (múltiplos)
+      if (pendente.tipo === 'cancelar_selecao' && pendente.params?.eventos) {
+        const eventos = pendente.params.eventos;
+
+        // Match número direto: "1", "2", "3"
+        const matchNum = msgL.match(/^\s*([1-9])\s*$/);
+        if (matchNum) {
+          const idx = parseInt(matchNum[1]) - 1;
+          if (idx >= 0 && idx < eventos.length) {
+            const ev = eventos[idx];
+            await limparAcaoPendente(chatId);
+            try {
+              const { google } = require('googleapis');
+              const { getAuthClient } = require('../integrations/calendar');
+              const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
+              await cal.events.delete({ calendarId: ev.calendarId, eventId: ev.id });
+              return `🗑️ <b>${ev.summary}</b> removido do calendário.`;
+            } catch(e) {
+              return `❌ Erro ao remover: ${e.message}`;
+            }
+          }
+          return `Opa, só tem ${eventos.length} opções. Manda número entre 1 e ${eventos.length}.`;
+        }
+
+        // Match por dia: "o de hoje", "o de amanhã"
+        const matchHoje = /\b(hoje|de hoje|do dia)\b/i.test(msgL);
+        const matchAmanha = /\b(amanh[aã]|de amanh[aã])\b/i.test(msgL);
+        if (matchHoje || matchAmanha) {
+          const hoje = new Date();
+          const amanha = new Date(hoje.getTime() + 24*60*60*1000);
+          const alvo = matchHoje ? hoje : amanha;
+          const evMatch = eventos.find(ev => {
+            const start = new Date(ev.startISO);
+            return start.toDateString() === alvo.toDateString();
+          });
+          if (evMatch) {
+            await limparAcaoPendente(chatId);
+            try {
+              const { google } = require('googleapis');
+              const { getAuthClient } = require('../integrations/calendar');
+              const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
+              await cal.events.delete({ calendarId: evMatch.calendarId, eventId: evMatch.id });
+              return `🗑️ <b>${evMatch.summary}</b> de ${matchHoje ? 'hoje' : 'amanhã'} removido.`;
+            } catch(e) {
+              return `❌ Erro ao remover: ${e.message}`;
+            }
+          }
+          return `Não achei nenhum evento ${matchHoje ? 'de hoje' : 'de amanhã'} na lista. Manda o número.`;
+        }
+
+        // Cancelar a seleção
+        if (neg.test(msgL)) {
+          await limparAcaoPendente(chatId);
+          return '✋ Ok, não cancelei nada.';
+        }
+
+        // Ainda esperando seleção válida
+        return `Manda o número (1-${eventos.length}) ou "o de hoje/amanhã" pra eu saber qual cancelar.`;
+      }
+
+      // Handlers genéricos (preservados)
       if (pos.test(msgL)) {
         await limparAcaoPendente(chatId);
         return await executarAcaoConfirmada(pendente);
@@ -613,11 +675,39 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       return `🔄 <b>Confirma mover "${ev.summary}"${quandoAtual ? ' de' + quandoAtual : ''} para ${novoQuando}?</b>\nResponda "sim" ou "não".`;
     }
 
-    // CANCELAR — pede confirmação
+    // CANCELAR — pede confirmação (ou seleção se múltiplos)
     if (intent.acao === 'cancelar') {
       if (!intent.evento_original) return '🗑️ Qual evento quer cancelar?';
       const eventos = await buscarComSinonimos(intent.evento_original, intent.sinonimos_busca || []);
       if (!eventos.length) return `❌ Não encontrei "<b>${intent.evento_original}</b>".`;
+
+      // Múltiplos: salva IDs e pede seleção (número ou por dia)
+      if (eventos.length > 1) {
+        const diasAbrev = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+        const lista = eventos.slice(0, 5).map((ev, i) => {
+          const start = new Date(ev.start?.dateTime || ev.start?.date);
+          const dia = diasAbrev[start.getDay()];
+          const hora = ev.start?.dateTime
+            ? start.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit', timeZone: 'America/Sao_Paulo' })
+            : '';
+          return `${i+1}️⃣ ${ev.summary} — ${dia} ${hora}`.trim();
+        }).join('\n');
+        await salvarAcaoPendente(chatId, {
+          tipo: 'cancelar_selecao',
+          params: {
+            eventos: eventos.slice(0, 5).map(ev => ({
+              id: ev.id,
+              calendarId: ev._calendarId,
+              summary: ev.summary,
+              startISO: ev.start?.dateTime || ev.start?.date,
+            })),
+          },
+        });
+        const n = Math.min(eventos.length, 5);
+        return `Encontrei ${eventos.length} eventos. Qual cancelar?\n\n${lista}\n\nManda o número (1-${n}) ou "o de hoje".`;
+      }
+
+      // 1 evento: caminho original (confirma e executa via executarAcaoConfirmada)
       const ev = eventos[0];
       const quando = formatarQuandoEvento(ev);
       await salvarAcaoPendente(chatId, {
