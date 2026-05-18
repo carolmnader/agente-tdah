@@ -257,7 +257,9 @@ Nota interna: ${analysis.thinking_note}`;
     max_tokens: 4096,
     system: systemWithMemory,
     messages: [
-      ...history.slice(-10), // últimas 10 mensagens
+      // Onda 1.7: sanitiza history pra remover created_at (vazado da Onda 1.6
+      // COMMIT 2). Anthropic 400 "Extra inputs are not permitted" se passar.
+      ...history.slice(-10).map(m => ({ role: m.role, content: m.content })),
       { role: 'user', content: message }
     ],
   });
@@ -592,7 +594,8 @@ Carol enviou uma imagem. Analise visualmente e responda de forma útil, conectan
       max_tokens: 4096,
       system: systemWithMemory,
       messages: [
-        ...history.slice(-6),
+        // Onda 1.7: sanitiza history (mesmo motivo de generateResponse acima).
+        ...history.slice(-6).map(m => ({ role: m.role, content: m.content })),
         {
           role: 'user',
           content: [

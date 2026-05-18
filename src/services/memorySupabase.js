@@ -165,6 +165,11 @@ async function buscarHistorico(limite = 20) {
 
   if (error) { console.error('Erro ao buscar histórico:', error.message); return []; }
 
+  // NOTA: created_at e' incluido pra filtro temporal do calendarBrain
+  // (Onda 1.6 Opcao A). Consumers de Anthropic API DEVEM extrair so
+  // { role, content } antes de passar em messages[], senao Anthropic
+  // retorna 400 "messages.X.created_at: Extra inputs are not permitted".
+  // Ver brain.js generateResponse + thinkWithImage como referencia.
   return (data || []).reverse().map(m => ({
     role: m.role,
     content: m.content,
