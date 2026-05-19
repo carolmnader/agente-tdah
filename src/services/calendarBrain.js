@@ -422,7 +422,7 @@ RETORNE APENAS JSON:
   "raciocinio": "explicação em 1 linha"
 }`;
 
-const processarCalendar = async (mensagem, historico = [], chatId = parseInt(process.env.TELEGRAM_CHAT_ID_CAROL || '0', 10)) => {
+const processarCalendar = async (mensagem, historico = [], chatId = parseInt(process.env.TELEGRAM_CHAT_ID_CAROL || '0', 10), opcoes = {}) => {
   try {
     const mem = global.ariaMemoria;
     const msgL = mensagem.toLowerCase();
@@ -538,11 +538,43 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
             resp += `❌ Erro substituindo ${c.existente.summary} → ${c.novo.titulo}: ${e.message}\n`;
           }
         }
+
+        // Onda 1.8 Opção D: re-roteamento de frase composta apos gatilho.
+        // Ex: "Sim. Coloca cinema 19h tambem" — gatilho "sim" foi processado
+        // acima; resto da mensagem ("Coloca cinema 19h tambem") precisa ir
+        // pro classifier de novo. Guard anti-loop via opcoes._jaProcessouSubstituicao.
+        if (!opcoes._jaProcessouSubstituicao) {
+          const restoMsg = mensagem
+            .replace(/^[\s.,!]*\b(sim|substitui|pode|ok|beleza|confirma|troca|remove os|cancela os)\b[\s.,!]*/i, '')
+            .replace(/^(tambem|também|e tambem|e também)[\s.,!]+/i, '')
+            .trim();
+          if (restoMsg.length > 8 && /\b(adiciona|coloca|cria|agenda|cancela|reagenda|move|tira|bota|marca)\b/i.test(restoMsg)) {
+            const respExtra = await processarCalendar(restoMsg, historico, chatId, { _jaProcessouSubstituicao: true });
+            if (respExtra) return `${resp}\n\n${respExtra}`;
+          }
+        }
+
         return resp;
       }
       if (/pula|ignora|só os livres|sem conflito|mantém/.test(msgL)) {
         mem.conflitosCalendarPendentes = null;
-        return '✅ Ok! Mantive só os eventos sem conflito.';
+        let resp = '✅ Ok! Mantive só os eventos sem conflito.';
+
+        // Onda 1.8 Opção D: mesmo re-roteamento aplicado ao "pula" composto.
+        // Ex: "Pula. Adiciona cinema 19h tambem" — gatilho "pula" processou
+        // o conflito; resto precisa ir pro classifier.
+        if (!opcoes._jaProcessouSubstituicao) {
+          const restoMsg = mensagem
+            .replace(/^[\s.,!]*\b(pula|ignora|mantém|mantem|deixa|sem conflito|só os livres|so os livres)\b[\s.,!]*/i, '')
+            .replace(/^(tambem|também|e tambem|e também)[\s.,!]+/i, '')
+            .trim();
+          if (restoMsg.length > 8 && /\b(adiciona|coloca|cria|agenda|cancela|reagenda|move|tira|bota|marca)\b/i.test(restoMsg)) {
+            const respExtra = await processarCalendar(restoMsg, historico, chatId, { _jaProcessouSubstituicao: true });
+            if (respExtra) return `${resp}\n\n${respExtra}`;
+          }
+        }
+
+        return resp;
       }
     }
 
