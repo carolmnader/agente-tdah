@@ -635,7 +635,11 @@ async function getHistory() {
 // addMessage agora salva em ambos (Supabase + JSON local)
 async function addMessage(role, content) {
   // Supabase
-  const humor = detectarHumor(content);
+  // Bug B fix (19/05): detectarHumor só faz sentido pra input da Carol.
+  // Resposta da ARIA contem prosa pacifica ("vamos com calma", "tudo bem")
+  // que a regex pega como humor — ruido que polui histórico, briefing,
+  // análise de humor e relatórios. Guard na origem.
+  const humor = role === 'user' ? detectarHumor(content) : null;
   await salvarMensagem(role, content, { humor });
 
   // JSON local (compatibilidade)
