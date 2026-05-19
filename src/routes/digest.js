@@ -25,29 +25,77 @@ function escaparHTML(texto) {
     .replace(/>/g, "&gt;");
 }
 
+function formatarDataPTBR(dateStr) {
+  try {
+    const d = new Date(dateStr + "T00:00:00");
+    const dias = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+    const meses = [
+      "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+      "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
+    ];
+    return `${dias[d.getDay()]}, ${d.getDate()} de ${meses[d.getMonth()]}`;
+  } catch (e) {
+    return dateStr;
+  }
+}
+
 function montarMensagem(payload) {
-  const { date, summary, video_count, pdf_drive_url, highlights, harvest_stats } = payload;
+  const {
+    date,
+    summary,
+    video_count,
+    pdf_drive_url,
+    highlights,
+    harvest_stats,
+  } = payload;
+
+  const SEP = "━━━━━━━━━━━━━━━━";
+  const EMOJIS_NUM = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"];
+
+  const dataFormatada = formatarDataPTBR(date);
 
   const dryNote = harvest_stats?.dry_day
-    ? "\n\n⚠️ <i>Dia seco — colheita pobre.</i>"
+    ? "\n⚠️ <i>Dia seco — colheita pobre.</i>"
     : "";
 
-  const destaques = (highlights || [])
-    .slice(0, 3)
+  const items = (highlights || []).slice(0, 5);
+
+  const destaques = items
     .map((h, i) => {
       const titulo = escaparHTML(h.title);
       const canal = escaparHTML(h.channel);
       const motivo = escaparHTML(h.why);
-      return `${i + 1}. <a href="${h.url}">${titulo}</a> — <i>${canal}</i>\n   ${motivo}`;
+      const num = EMOJIS_NUM[i] || `${i + 1}.`;
+      return (
+        `${num} <a href="${h.url}"><b>${titulo}</b></a>\n` +
+        `   📺 <i>${canal}</i>\n` +
+        `<blockquote>${motivo}</blockquote>`
+      );
     })
-    .join("\n\n");
+    .join("\n");
+
+  const total = harvest_stats?.total_videos;
+  const filtrados = harvest_stats?.filtered_in ?? video_count;
+  const statsLine =
+    total && total > filtrados
+      ? `📊 <b>${filtrados} vídeos</b> filtrados de <b>${total}</b> capturados`
+      : `📊 <b>${video_count} vídeo(s)</b> selecionados hoje`;
+
+  const pdfLine = pdf_drive_url
+    ? `📄 <a href="${escaparHTML(pdf_drive_url)}">Ver PDF completo no Drive</a>`
+    : "";
 
   return (
-    `📰 <b>Daily IA Digest · ${escaparHTML(date)}</b>\n\n` +
-    `${escaparHTML(summary)}${dryNote}\n\n` +
-    (destaques ? `<b>Destaques:</b>\n${destaques}\n\n` : "") +
-    `📊 ${video_count} vídeo(s) hoje\n` +
-    (pdf_drive_url ? `📄 PDF completo: ${escaparHTML(pdf_drive_url)}` : "")
+    `📰 <b>Daily IA Digest</b>\n` +
+    `📅 <i>${escaparHTML(dataFormatada)}</i>\n\n` +
+    `${SEP}\n\n` +
+    `<b>Resumo do dia</b>\n${escaparHTML(summary)}${dryNote}\n\n` +
+    `${SEP}\n\n` +
+    (destaques
+      ? `✨ <b>TOP ${items.length} PRA VOCÊ</b>\n\n${destaques}\n\n${SEP}\n\n`
+      : "") +
+    `${statsLine}\n` +
+    pdfLine
   );
 }
 
@@ -93,4 +141,3 @@ router.post("/daily-digest", async (req, res) => {
 });
 
 module.exports = router;
-
