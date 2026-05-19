@@ -226,7 +226,18 @@ const executarCriarLote = async (eventosLote) => {
       const ocupados = (existentes.data.items || []).filter(e => !e.summary?.includes('Buffer') && !e.summary?.includes('🌿'));
       const evCal = ev.calendario || categorizarEvento(tituloFinal);
       if (ocupados.length > 0) {
-        conflitos.push({ novo: { ...ev, titulo: tituloFinal, calendario: evCal }, existente: ocupados[0].summary });
+        // Onda 1.8 Opção A: guarda IDs do evento existente pra delete atomico
+        // no handler "substitui". Antes era so `existente: ocupados[0].summary`
+        // (string), que forcava cancelarEvento(termo) a refazer busca — bug F.
+        conflitos.push({
+          novo: { ...ev, titulo: tituloFinal, calendario: evCal },
+          existente: {
+            id: ocupados[0].id,
+            calendarId: ocupados[0]._calendarId || 'primary',
+            summary: ocupados[0].summary,
+            startISO: ocupados[0].start?.dateTime || ocupados[0].start?.date,
+          }
+        });
       } else {
         await criarEvento(tituloFinal, dh, ev.duracao_minutos || 60, evCal);
         criados.push({ ...ev, titulo: tituloFinal });
@@ -256,7 +267,7 @@ const executarCriarLote = async (eventosLote) => {
     mem.conflitosCalendarPendentes = conflitos;
     resp += `\n\n⚠️ <b>${conflitos.length} conflito(s) detectado(s):</b>\n`;
     conflitos.forEach(c => {
-      resp += `🔴 "${c.novo.titulo}" conflita com "<b>${c.existente}</b>"\n`;
+      resp += `🔴 "${c.novo.titulo}" conflita com "<b>${c.existente.summary}</b>"\n`;
     });
     resp += `\nO que prefere?\n▸ <b>"substitui"</b> — remove os antigos e cria os novos\n▸ <b>"pula os conflitos"</b> — mantém os já criados`;
   }
@@ -506,15 +517,26 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       if (/substitui|sim|pode|cancela os|remove os|troca/.test(msgL)) {
         const conflitos = mem.conflitosCalendarPendentes;
         mem.conflitosCalendarPendentes = null;
+        // Onda 1.8 Opção A: delete atomico via cal.events.delete(id, calendarId)
+        // em vez de cancelarEvento(termo) — evita re-busca por termo, que
+        // retornava string da lista quando recorrente (bug F prod 18/05).
+        const { google } = require('googleapis');
+        const { getAuthClient } = require('../integrations/calendar');
+        const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
         let resp = '🔄 <b>Substituindo conflitos...</b>\n\n';
         for (const c of conflitos) {
           try {
-            await cancelarEvento(c.existente);
+            await cal.events.delete({
+              calendarId: c.existente.calendarId,
+              eventId: c.existente.id,
+            });
             const dh = resolverDataHora(c.novo.data, c.novo.hora);
             const tituloComEmoji = adicionarEmoji(c.novo.titulo);
             await criarEvento(tituloComEmoji, dh, c.novo.duracao_minutos || 60, c.novo.calendario || categorizarEvento(tituloComEmoji));
             resp += `✅ ${tituloComEmoji} às ${c.novo.hora}\n`;
-          } catch(e) { resp += `❌ Erro: ${c.novo.titulo}\n`; }
+          } catch(e) {
+            resp += `❌ Erro substituindo ${c.existente.summary} → ${c.novo.titulo}: ${e.message}\n`;
+          }
         }
         return resp;
       }
