@@ -264,7 +264,13 @@ Nota interna: ${analysis.thinking_note}`;
     ],
   });
 
-  return normalizarTratamento(response.content[0].text);
+  const textoFinal = normalizarTratamento(response.content[0].text);
+
+  // Onda 1.9 Layer 2: detector fire-and-forget de performance de subjetividade
+  const { detectarPerformaSubjetividade } = require('./detectarPerformaSubjetividade');
+  detectarPerformaSubjetividade(textoFinal, message, 'brain.generateResponse').catch(() => {});
+
+  return textoFinal;
 }
 
 // ─────────────────────────────────────────────
@@ -607,6 +613,10 @@ Carol enviou uma imagem. Analise visualmente e responda de forma útil, conectan
     });
 
     const ariaResponse = normalizarTratamento(response.content[0].text);
+
+    // Onda 1.9 Layer 2: detector fire-and-forget de performance de subjetividade
+    const { detectarPerformaSubjetividade } = require('./detectarPerformaSubjetividade');
+    detectarPerformaSubjetividade(ariaResponse, message, 'brain.thinkWithImage').catch(() => {});
 
     await addMessage('user', `[Imagem] ${message}`);
     await addMessage('assistant', ariaResponse);

@@ -14,6 +14,7 @@ const { tentarMarcarNotificado, limparAntigos } = require('../services/eventosNo
 const { snapshotMatinal } = require('../services/oura');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
+const { detectarPerformaSubjetividade } = require('../services/detectarPerformaSubjetividade');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -50,7 +51,12 @@ Gere APENAS a mensagem, sem explicações.`;
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
   });
-  return normalizarTratamento(resp.content[0].text);
+  const textoFinal = normalizarTratamento(resp.content[0].text);
+
+  // Onda 1.9 Layer 2: detector fire-and-forget de performance de subjetividade
+  detectarPerformaSubjetividade(textoFinal, null, 'scheduler.gerarMensagemProativa', { tipo: contexto.tipo }).catch(() => {});
+
+  return textoFinal;
 };
 
 // ─── JOB 1: BRIEFING MATINAL — todo dia às 7h ────────────────────────────────

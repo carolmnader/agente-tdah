@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 const Anthropic = require('@anthropic-ai/sdk');
 const { getFaseLunarLocal } = require('../integrations/astrology');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
+const { detectarPerformaSubjetividade } = require('./detectarPerformaSubjetividade');
 require('dotenv').config();
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
@@ -156,7 +157,12 @@ Gere APENAS o relatório, sem explicações extras.`
     }]
   });
 
-  return normalizarTratamento(resp.content[0].text);
+  const textoFinal = normalizarTratamento(resp.content[0].text);
+
+  // Onda 1.9 Layer 2: detector fire-and-forget de performance de subjetividade
+  detectarPerformaSubjetividade(textoFinal, null, 'analytics.gerarRelatorioIA', { tipo }).catch(() => {});
+
+  return textoFinal;
 };
 
 const gerarRelatorioSemanal = async () => {
