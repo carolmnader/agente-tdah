@@ -50,6 +50,10 @@ router.get('/semanal', wrapJob('semanal', () => jobs.jobPlanejamentoSemanal()));
 router.get('/aniversarios', wrapJob('aniversarios', () => jobs.jobAniversarios()));
 router.get('/relatorio-semanal', wrapJob('relatorio-semanal', () => jobs.jobRelatorioSemanal()));
 router.get('/relatorio-mensal', wrapJob('relatorio-mensal', () => jobs.jobRelatorioMensal()));
+// Weekly Review (Onda 1.5) — sábado 07h BRT via cron-job.org externo
+router.get('/weekly-review', wrapJob('weekly-review', () =>
+  jobs.jobWeeklyReview(process.env.TELEGRAM_CHAT_ID_CAROL)
+));
 // Análise Noturna — fire-and-forget (Bug #21). Job pode durar >30s (Haiku
 // + múltiplos Supabase calls). Cron-job.org só precisa saber que chegou.
 router.get('/noturno', (req, res) => {
