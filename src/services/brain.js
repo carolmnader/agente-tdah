@@ -396,6 +396,77 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
       return resp;
     }
 
+    // Passo 0f-weekly: respostas a Weekly Review (Onda 1.5)
+    // Parser "1 pinar" / "2 arquivar" / "3 ler" / "todas pinar" / "todas arquivar" / "pulo essa semana"
+    // Lê acoes_pendentes tipo='weekly_sugestoes' (params.sugestoes = array de IDs)
+    if (chatId) {
+      const { buscarAcaoPendente, limparAcaoPendente } = require('./memorySupabase');
+      const pendente = await buscarAcaoPendente(chatId);
+      if (pendente?.tipo === 'weekly_sugestoes') {
+        const matchSingle = lower.match(/^([1-3])\s+(pinar|arquivar|ler)$/i);
+        const matchTodas = lower.match(/^todas\s+(pinar|arquivar)$/i);
+        const matchPulo = /^pul[oa]\s+essa\s+semana$/i.test(lower);
+
+        if (matchSingle) {
+          const idx = parseInt(matchSingle[1], 10) - 1;
+          const acao = matchSingle[2].toLowerCase();
+          const sugestaoId = pendente.params?.sugestoes?.[idx];
+          if (!sugestaoId) {
+            const resp = `Não achei a sugestão ${matchSingle[1]} na lista. Tenta de novo ou "todas arquivar".`;
+            await addMessage('user', message);
+            await addMessage('assistant', resp);
+            return resp;
+          }
+
+          if (acao === 'ler') {
+            const { buscarSugestaoPorId } = require('./sugestoes');
+            const detalhe = await buscarSugestaoPorId(sugestaoId);
+            const resp = `<b>${detalhe.titulo}</b>\n\n${detalhe.descricao}\n\n` +
+              `<i>Confiança: ${Number(detalhe.confianca).toFixed(2)} · ${detalhe.categoria} · P${detalhe.prioridade}. Manda "${matchSingle[1]} pinar" ou "${matchSingle[1]} arquivar" pra decidir.</i>`;
+            await addMessage('user', message);
+            await addMessage('assistant', resp);
+            return resp;
+          }
+
+          // pinar ou arquivar
+          const novoStatus = acao === 'pinar' ? 'pinada' : 'arquivada';
+          const { marcarStatus } = require('./sugestoes');
+          await marcarStatus(sugestaoId, novoStatus);
+          const resp = `${acao === 'pinar' ? '📌' : '🗑️'} Sugestão ${matchSingle[1]} ${novoStatus}.`;
+          await addMessage('user', message);
+          await addMessage('assistant', resp);
+          return resp;
+        }
+
+        if (matchTodas) {
+          const acao = matchTodas[1].toLowerCase();
+          const novoStatus = acao === 'pinar' ? 'pinada' : 'arquivada';
+          const { marcarStatus } = require('./sugestoes');
+          const ids = pendente.params?.sugestoes || [];
+          for (const id of ids) {
+            try { await marcarStatus(id, novoStatus); } catch (e) { console.log('🟡 [0f-weekly] marcarStatus falhou:', e.message); }
+          }
+          await limparAcaoPendente(chatId);
+          const { marcarWeeklyRespondida } = require('./weeklyReview');
+          await marcarWeeklyRespondida(chatId, `todas_${acao}`);
+          const resp = `${acao === 'pinar' ? '📌' : '🗑️'} ${ids.length} sugestões ${novoStatus}.`;
+          await addMessage('user', message);
+          await addMessage('assistant', resp);
+          return resp;
+        }
+
+        if (matchPulo) {
+          await limparAcaoPendente(chatId);
+          // NÃO marca respondida — pulo conta como skip pra weekly_review_log
+          const resp = 'Ok, pulei essa semana. Próximo sábado eu volto.';
+          await addMessage('user', message);
+          await addMessage('assistant', resp);
+          return resp;
+        }
+        // Nenhum match — segue fluxo normal; TTL 5min de acoes_pendentes resolve
+      }
+    }
+
     // Passo 0b3: emergência → protocolo 3 passos direto (ANTES do Calendar para não gastar tokens)
     if (isEmergencia(message)) {
       const emergenciaMsg = getModoEmergencia();

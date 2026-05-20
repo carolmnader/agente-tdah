@@ -92,10 +92,27 @@ async function buscarPinadas() {
   }));
 }
 
+/**
+ * Busca sugestão única pelo ID. Usado pelo handler 0f-weekly em brain.js
+ * pra expandir "3 ler" — Carol pede detalhe completo no chat.
+ * @param {number} id
+ * @returns {Promise<{id, titulo, descricao, confianca, categoria, prioridade}>}
+ */
+async function buscarSugestaoPorId(id) {
+  const { data, error } = await supabase
+    .from('sugestoes_arquiteturais')
+    .select('id, titulo, descricao, confianca, categoria, prioridade')
+    .eq('id', id)
+    .single();
+  if (error) throw new Error(`buscarSugestaoPorId: ${error.message}`);
+  return data;
+}
+
 module.exports = {
   proporSugestao,
   listarSugestoesAbertas,
   marcarStatus,
   buscarPropostaJanela,
   buscarPinadas,
+  buscarSugestaoPorId,
 };

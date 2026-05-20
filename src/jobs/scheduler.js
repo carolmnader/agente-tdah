@@ -355,6 +355,38 @@ const jobRelatorioMensal = async () => {
   }
 };
 
+// ─── JOB 7.5: WEEKLY REVIEW — sábado 07h America/Sao_Paulo ──────────────────
+// Onda 1.5 — Ritual reflexivo de 6 blocos. Primeiro disparo: 23/05/2026.
+
+const jobWeeklyReview = async (chatId) => {
+  try {
+    console.log('[Scheduler] 🌅 Weekly Review disparado — chatId:', chatId);
+    const { gerarWeeklyReview } = require('../services/weeklyReview');
+    const { salvarAcaoPendente } = require('../services/memorySupabase');
+
+    const resultado = await gerarWeeklyReview(chatId, { trigger: 'cron' });
+
+    await enviarMensagemLonga(chatId, resultado.mensagem);
+
+    // Se houver sugestões em fila, salvar acao_pendente pra parser
+    // numerado em brain.js Passo 0f-weekly
+    if (resultado.deveSalvarPendente && resultado.sugestoesIds.length > 0) {
+      await salvarAcaoPendente(chatId, {
+        tipo: 'weekly_sugestoes',
+        params: {
+          sugestoes: resultado.sugestoesIds,
+          disparada_em: new Date().toISOString()
+        }
+      });
+    }
+
+    console.log(`[Scheduler] ✅ Weekly Review concluído — sugestões em fila: ${resultado.sugestoesIds.length}`);
+  } catch (err) {
+    console.error('[Scheduler] ❌ Erro Weekly Review:', err.message);
+    // Não re-throw — cron resiliente
+  }
+};
+
 // ─── JOB 8: ANÁLISE NOTURNA (memória evolutiva) — todo dia às 2h ────────────
 
 const jobAnaliseNoturna = async () => {
@@ -434,6 +466,10 @@ const iniciarScheduler = () => {
   // Memória evolutiva — análise noturna todo dia às 2h (não notifica Carol, só registra hipóteses)
   cron.schedule('0 2 * * *', jobAnaliseNoturna, { timezone: 'America/Sao_Paulo' });
 
+  // Weekly Review — sábado 07h BRT (Onda 1.5, primeiro disparo 23/05/2026)
+  // Timezone Sao_Paulo (Bug #16 forward-compat — não criar débito novo em Bahia)
+  cron.schedule('0 7 * * 6', () => jobWeeklyReview(CAROL_CHAT_ID), { timezone: 'America/Sao_Paulo' });
+
   console.log('[Scheduler] ✅ Jobs ativos:');
   console.log('  🌅 Briefing matinal: todo dia às 7h');
   console.log('  🎂 Aniversários: todo dia às 8h');
@@ -443,6 +479,7 @@ const iniciarScheduler = () => {
   console.log('  🌙 Resumo noturno: todo dia às 22h');
   console.log('  📈 Relatório mensal: dia 1 às 9h');
   console.log('  🌙 Análise evolutiva (memória): todo dia às 2h');
+  console.log('  🌅 Weekly Review: sábado às 7h America/Sao_Paulo');
 };
 
 module.exports = {
@@ -456,4 +493,5 @@ module.exports = {
   jobRelatorioSemanal,
   jobRelatorioMensal,
   jobAnaliseNoturna,
+  jobWeeklyReview,
 };
