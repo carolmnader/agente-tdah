@@ -6,7 +6,10 @@ const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const CATEGORIAS_VALIDAS = ['feature', 'bug', 'refactor', 'voice_calibration'];
-const STATUS_VALIDOS = ['proposta', 'aceita', 'rejeitada', 'implementada'];
+// Bug G família removeu CHECK constraint do banco (19/05/2026) — lista
+// canônica vive aqui no código. 'pinada'/'arquivada' adicionados pra Weekly
+// Review (Onda 1.5).
+const STATUS_VALIDOS = ['proposta', 'aceita', 'rejeitada', 'implementada', 'pinada', 'arquivada'];
 
 async function proporSugestao({ titulo, descricao, categoria, prioridade = 3, confianca = 0.5, origem, contexto = {} }) {
   if (!titulo || !descricao || !categoria || !origem) {
@@ -46,8 +49,53 @@ async function marcarStatus(id, novoStatus) {
   return data;
 }
 
+/**
+ * Busca sugestões com status='proposta' criadas nos últimos `diasAtras` dias.
+ * Diferente de listarSugestoesAbertas (sem janela), aplica filtro temporal
+ * para o Weekly Review enxergar só o que apareceu na semana corrente.
+ * @param {number} diasAtras - janela em dias (default 7)
+ * @returns {Promise<Array<{id, titulo, descricao, confianca, categoria, prioridade}>>}
+ */
+async function buscarPropostaJanela(diasAtras = 7) {
+  const desde = new Date(Date.now() - diasAtras * 86400000).toISOString();
+  const { data, error } = await supabase
+    .from('sugestoes_arquiteturais')
+    .select('id, titulo, descricao, confianca, categoria, prioridade')
+    .eq('status', 'proposta')
+    .gte('created_at', desde)
+    .order('confianca', { ascending: false })
+    .limit(10);
+  if (error) throw new Error(`buscarPropostaJanela: ${error.message}`);
+  return data || [];
+}
+
+/**
+ * Busca sugestões com status='pinada'. Retorna campo derivado
+ * weeks_since_pinned (semanas desde created_at). Usado pra D5: pinada
+ * >6 semanas ARIA só nomeia gentil no Pin Board do Weekly Review.
+ * @returns {Promise<Array<{id, titulo, descricao, confianca, weeks_since_pinned}>>}
+ */
+async function buscarPinadas() {
+  const { data, error } = await supabase
+    .from('sugestoes_arquiteturais')
+    .select('id, titulo, descricao, confianca, created_at')
+    .eq('status', 'pinada')
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(`buscarPinadas: ${error.message}`);
+  const agora = Date.now();
+  return (data || []).map(s => ({
+    id: s.id,
+    titulo: s.titulo,
+    descricao: s.descricao,
+    confianca: s.confianca,
+    weeks_since_pinned: Math.floor((agora - new Date(s.created_at).getTime()) / (7 * 86400000))
+  }));
+}
+
 module.exports = {
   proporSugestao,
   listarSugestoesAbertas,
   marcarStatus,
+  buscarPropostaJanela,
+  buscarPinadas,
 };

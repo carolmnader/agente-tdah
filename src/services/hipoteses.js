@@ -206,6 +206,33 @@ async function resumoSemanal() {
   };
 }
 
+/**
+ * Busca hipóteses com status='validada' nos últimos `diasAtras` dias.
+ * ⚠️ NÃO marca como notificada (diferente de buscarAprendizadosNaoNotificados).
+ * Weekly Review (Onda 1.5) usa esta função pra não disputar pool com o
+ * briefing matinal de sábado 7h (Q1 aprovada: janela própria sem marcar).
+ * Usa ultima_validacao como referência temporal; fallback pra criada_em.
+ * @param {number} diasAtras - janela em dias (default 7)
+ * @returns {Promise<Array<{id, texto, confianca, tags}>>}
+ */
+async function buscarHipotesesValidadasJanela(diasAtras = 7) {
+  const desde = new Date(Date.now() - diasAtras * 86400000).toISOString();
+  const { data, error } = await supabase
+    .from('hipoteses')
+    .select('id, texto, confianca, tags, ultima_validacao, criada_em')
+    .eq('status', 'validada')
+    .or(`ultima_validacao.gte.${desde},criada_em.gte.${desde}`)
+    .order('confianca', { ascending: false })
+    .limit(10);
+  if (error) throw new Error(`buscarHipotesesValidadasJanela: ${error.message}`);
+  return (data || []).map(h => ({
+    id: h.id,
+    texto: h.texto,
+    confianca: h.confianca,
+    tags: h.tags
+  }));
+}
+
 module.exports = {
   proporHipotese,
   validarHipotese,
@@ -218,4 +245,5 @@ module.exports = {
   marcarComoNotificadas,
   buscarHipotesesRelevantes,
   resumoSemanal,
+  buscarHipotesesValidadasJanela,
 };

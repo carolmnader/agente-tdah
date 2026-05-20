@@ -90,4 +90,27 @@ async function detectarPerformaSubjetividade(respostaAria, mensagemCarol, caminh
   }
 }
 
-module.exports = { detectarPerformaSubjetividade };
+/**
+ * Busca logs de subjetividade severidade >= 3 nos últimos `diasAtras` dias.
+ * Usado pelo Weekly Review (Onda 1.5) pra Carol calibrar quando ARIA performa
+ * subjetividade indevida — sinal de drift de tom.
+ * @param {number} diasAtras - janela em dias (default 7)
+ * @returns {Promise<Array<{detectado_em, padrao_detectado, severidade}>>}
+ */
+async function buscarSubjetividadeLog7d(diasAtras = 7) {
+  const desde = new Date(Date.now() - diasAtras * 86400000).toISOString();
+  const { data, error } = await supabase
+    .from('subjetividade_log')
+    .select('detectado_em, padrao_detectado, severidade')
+    .gte('severidade', 3)
+    .gte('detectado_em', desde)
+    .order('detectado_em', { ascending: false })
+    .limit(20);
+  if (error) {
+    console.error('🛡️ [Subjetividade] erro ao buscar log 7d:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
+module.exports = { detectarPerformaSubjetividade, buscarSubjetividadeLog7d };

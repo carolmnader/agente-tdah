@@ -182,11 +182,75 @@ async function snapshotMatinal() {
   return { sono, readiness, atividade, stress, workouts };
 }
 
+/**
+ * Snapshot agregado dos últimos 7 dias. Janela start_date = hoje-6, end_date = hoje.
+ * 3 fetchs paralelos (sleep / readiness / activity) com agregação local.
+ * Retorna null se Oura API falhar — caller no Weekly Review deve degradar
+ * graciosamente sem o Bloco 3.
+ * @returns {Promise<{sleep:{avg,min,max,nights}, readiness:{avg,min,max,days}, activity:{steps_avg,active_minutes_avg,days}}|null>}
+ */
+async function snapshotSemanal() {
+  if (!OURA_TOKEN) {
+    console.log('🟡 [Oura semanal] OURA_TOKEN ausente, pulando');
+    return null;
+  }
+  const hoje = new Date();
+  const inicio = new Date(hoje); inicio.setDate(inicio.getDate() - 6);
+  const start = ymdSaoPaulo(inicio);
+  const end = ymdSaoPaulo(hoje);
+
+  const [sleepData, readinessData, activityData] = await Promise.all([
+    ouraFetch('daily_sleep', { start_date: start, end_date: end }),
+    ouraFetch('daily_readiness', { start_date: start, end_date: end }),
+    ouraFetch('daily_activity', { start_date: start, end_date: end }),
+  ]);
+
+  // Caso todos falhem, retorna null pro caller pular Bloco 3
+  if (!sleepData && !readinessData && !activityData) return null;
+
+  const agg = (arr, getter) => {
+    const vals = (arr || []).map(getter).filter(v => v != null && !Number.isNaN(v));
+    if (!vals.length) return null;
+    const avg = Math.round(vals.reduce((s, v) => s + v, 0) / vals.length);
+    return { avg, min: Math.min(...vals), max: Math.max(...vals), n: vals.length };
+  };
+
+  const sleepStats = agg(sleepData?.data, d => d.score);
+  const sleepMin = agg(sleepData?.data, d => d.contributors?.total_sleep ? Math.round(d.contributors.total_sleep / 60) : null);
+  const readinessStats = agg(readinessData?.data, d => d.score);
+  const stepsStats = agg(activityData?.data, d => d.steps);
+  const activeStats = agg(activityData?.data, d => d.contributors?.move_every_hour ?? null);
+
+  return {
+    sleep: sleepStats ? {
+      avg: sleepStats.avg,
+      min: sleepStats.min,
+      max: sleepStats.max,
+      nights: sleepStats.n,
+      total_sleep_min_avg: sleepMin?.avg ?? null
+    } : null,
+    readiness: readinessStats ? {
+      avg: readinessStats.avg,
+      min: readinessStats.min,
+      max: readinessStats.max,
+      days: readinessStats.n
+    } : null,
+    activity: stepsStats ? {
+      steps_avg: stepsStats.avg,
+      steps_min: stepsStats.min,
+      steps_max: stepsStats.max,
+      active_minutes_avg: activeStats?.avg ?? null,
+      days: stepsStats.n
+    } : null
+  };
+}
+
 module.exports = {
   fetchSonoOntem,
   fetchReadinessHoje,
   fetchAtividadeHoje,
   fetchStressHoje,
   fetchWorkoutsHoje,
-  snapshotMatinal
+  snapshotMatinal,
+  snapshotSemanal
 };

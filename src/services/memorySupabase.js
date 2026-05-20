@@ -678,6 +678,81 @@ async function getMemorySummary() {
   return profileCtx + supabaseCtx;
 }
 
+// ━━━ HELPERS WEEKLY REVIEW (Onda 1.5) ━━━
+
+/**
+ * Busca memórias canônicas (categoria + chave) criadas nos últimos `diasAtras`
+ * dias, ainda ativas (superseded_at IS NULL). Usado pelo Weekly Review pra
+ * mostrar "fatos novos sobre você esta semana".
+ * @param {number} diasAtras - janela em dias (default 7)
+ * @returns {Promise<Array<{categoria, chave, valor, created_at}>>}
+ */
+async function buscarMemoriasCanonicasNovas(diasAtras = 7) {
+  const desde = new Date(Date.now() - diasAtras * 86400000).toISOString();
+  const { data, error } = await supabase
+    .from('memorias')
+    .select('categoria, chave, valor, created_at')
+    .is('superseded_at', null)
+    .gte('created_at', desde)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) {
+    console.error('Erro ao buscar memórias canônicas novas:', error.message);
+    return [];
+  }
+  return data || [];
+}
+
+/**
+ * Conta cancelamentos/desistências de Carol nos últimos `diasAtras` dias.
+ * Usado pelo Weekly Review como sinal factual (não-julgamento) de "padrão
+ * de pular X" — só conta, Carol interpreta.
+ * @param {number} diasAtras - janela em dias (default 7)
+ * @returns {Promise<number>}
+ */
+async function buscarCancelamentosCount(diasAtras = 7) {
+  const desde = new Date(Date.now() - diasAtras * 86400000).toISOString();
+  const { data, error } = await supabase
+    .from('mensagens')
+    .select('id, intent, content')
+    .eq('role', 'user')
+    .gte('created_at', desde);
+  if (error) {
+    console.error('Erro ao buscar cancelamentos:', error.message);
+    return 0;
+  }
+  const re = /\b(não fiz|nao fiz|cancelei|não consegui|nao consegui|pulei)\b/i;
+  return (data || []).filter(m => m.intent === 'cancelar' || re.test(m.content || '')).length;
+}
+
+/**
+ * Lê o log de Weekly Reviews disparados (memorias categoria='sistema',
+ * chave='weekly_review_log'). Cada disparo grava uma linha; campo `valor`
+ * pode marcar 'pulado' ou 'respondido'. Usado pra:
+ *  - C4: detectar se Carol pulou 3 weekly seguidos
+ *  - Calibração mensal: a cada 4 weekly disparados, fazer pergunta de
+ *    calibração (D3)
+ * @param {number} limite - quantos últimos disparos (default 4)
+ * @returns {Promise<Array<{disparo, respondida_em}>>}
+ */
+async function buscarWeeklyLog(limite = 4) {
+  const { data, error } = await supabase
+    .from('memorias')
+    .select('valor, created_at, updated_at')
+    .eq('categoria', 'sistema')
+    .eq('chave', 'weekly_review_log')
+    .order('created_at', { ascending: false })
+    .limit(limite);
+  if (error) {
+    console.error('Erro ao buscar weekly_log:', error.message);
+    return [];
+  }
+  return (data || []).map(m => ({
+    disparo: m.created_at,
+    respondida_em: m.valor && m.valor !== 'pulado' ? m.updated_at : null
+  }));
+}
+
 module.exports = {
   // Novas funções Supabase
   salvarMemoria,
@@ -701,6 +776,10 @@ module.exports = {
   buscarAcaoPendente,
   limparAcaoPendente,
   marcarUpdateProcessado,
+  // Onda 1.5 — helpers Weekly Review
+  buscarMemoriasCanonicasNovas,
+  buscarCancelamentosCount,
+  buscarWeeklyLog,
   // Compatibilidade
   addMessage,
   getHistory,
