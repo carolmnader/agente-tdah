@@ -12,6 +12,7 @@ const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturn
 const { proporSugestao } = require('../services/sugestoes');
 const { jaNotificado, marcarNotificado, limparAntigos } = require('../services/eventosNotificados');
 const { snapshotMatinal } = require('../services/oura');
+const { getBrtNow } = require('../utils/time');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
 const { detectarPerformaSubjetividade } = require('../services/detectarPerformaSubjetividade');
@@ -24,7 +25,12 @@ const CAROL_CHAT_ID = process.env.TELEGRAM_CHAT_ID_CAROL;
 // ─── GERADOR DE MENSAGEM PROATIVA ────────────────────────────────────────────
 
 const gerarMensagemProativa = async (contexto) => {
+  const agora = getBrtNow();
   const userPrompt = `Você está enviando uma mensagem PROATIVA pra Carol no Telegram (não é resposta a pergunta dela).
+
+━━━ AGORA ━━━
+Hora: ${agora.hora} BRT · ${agora.diaSemana}, ${agora.dataBR} · Período: ${agora.periodo}
+Use essa âncora pra saudações e referências temporais. NUNCA chute período pelo conteúdo do contexto.
 
 TIPO: ${contexto.tipo}
 CONTEXTO: ${JSON.stringify(contexto.dados)}

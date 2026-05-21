@@ -7,6 +7,7 @@ const { getFaseLunar, getContextoAstrologico } = require('../integrations/astrol
 const { getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holistic-context');
 const { processarCalendar } = require('./calendarBrain');
+const { getBrtNow } = require('../utils/time');
 const { buscarPessoaInteligente, formatarPessoa, salvarOuAtualizarPessoa, buildPessoasContextoMensagem } = require('./crm');
 const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
 const { hipotesesParaPrompt, listarHipotesesValidadas } = require('./hipoteses');
@@ -230,6 +231,8 @@ Meta 2026: ${meta}`;
     ? `\n━━━ O QUE VOCÊ APRENDEU SOBRE CAROL ━━━\n${hipotesesAtivas.map(h => `- ${h.texto} (confiança: ${parseFloat(h.confianca).toFixed(2)})`).join('\n')}\n\nUse essas hipóteses pra contextualizar, não repeti-las de volta. Não invente novas aqui.`
     : '';
 
+  const agora = getBrtNow();
+
   const systemWithMemory = `${SYSTEM_PROMPT}${blocoHipoteses}
 ${profileContext}
 ${holisticContext}
@@ -241,6 +244,12 @@ ${novasInstrucao}
 
 ━━━ APRENDIZADOS DA ARIA ━━━
 ${evolvedAdditions || 'Sem aprendizados adicionais ainda.'}
+
+━━━ AGORA ━━━
+Hora: ${agora.hora} BRT
+Dia: ${agora.diaSemana}, ${agora.dataBR}
+Período: ${agora.periodo}
+Use essa âncora pra qualquer referência temporal (saudações, "hoje", "agora", "ontem"). NUNCA chute período por contexto.
 
 ━━━ INSTRUÇÃO DESTA RESPOSTA ━━━
 Estratégia: ${strategy.name}
@@ -652,6 +661,8 @@ async function thinkWithImage(message, imageContent) {
       profileContext = `\n━━━ QUEM É A CAROL ━━━\n${carolProfile.profile?.preferred_name || 'Carol'}, ${carolProfile.profile?.profession || 'Arquiteta'}`;
     }
 
+    const agora = getBrtNow();
+
     const systemWithMemory = `${SYSTEM_PROMPT}
 ${profileContext}
 
@@ -660,6 +671,12 @@ ${memorySummary || 'Primeira conversa do dia.'}
 
 ━━━ APRENDIZADOS DA ARIA ━━━
 ${evolvedAdditions || 'Sem aprendizados adicionais ainda.'}
+
+━━━ AGORA ━━━
+Hora: ${agora.hora} BRT
+Dia: ${agora.diaSemana}, ${agora.dataBR}
+Período: ${agora.periodo}
+Use essa âncora pra qualquer referência temporal (saudações, "hoje", "agora", "ontem"). NUNCA chute período por contexto.
 
 ━━━ INSTRUÇÃO ━━━
 Carol enviou uma imagem. Analise visualmente e responda de forma útil, conectando com o contexto dela se relevante.`;
