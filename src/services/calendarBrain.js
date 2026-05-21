@@ -100,6 +100,20 @@ const RE_FALSO_POSITIVO_TEM_ESTADO = /^\s*(n[aã]o\s+tenho\b|tenho\s+at[eé]\b|t
 const RE_FATO_PASSADO = /^\s*(n[aã]o\s+(fui|fiz|consegui|deu|cheguei|tive|rolou|aconteceu|sa[íi]|acordei)|cheguei\s+tarde|esqueci|perdi|faltei|pulei|passei\s+o\s+dia\s+sem|deixei\s+pra\s+l[aá]|acabei\s+n[aã]o|falhei|escapei|travei)(?=$|\W)/i;
 const RE_VERBO_IMPERATIVO_CALENDAR = /\b(cancela|cancelar|desmarca|desmarcar|tira|tirar|remove|adiciona|adicionar|marca|marcar|agenda|agendar|reagenda|reagendar|muda|mudar|move|mover|coloca|p[oõ]e|bota)\b/i;
 
+// Bug L: negação CLARA do fluxo de cancelamento, dividida em 2 níveis.
+//
+// FORTE: padrão por si só inequívoco — "não quero cancelar" / "não era pra
+// cancelar" / "pra você saber apenas". Inclui "cancelar" como objeto de "não
+// quero" (infinitivo NÃO é imperativo). Não precisa proteção.
+//
+// AMBIGUA: gatilhos que podem coexistir com imperativo Calendar — "esquece",
+// "percebi que", "me confundi", "deixa pra lá". Protegida por
+// !RE_VERBO_IMPERATIVO_CALENDAR (simetria com RE_FATO_PASSADO):
+// "Percebi que tem 3, cancela o 2" → tem "cancela" imperativo → segue fluxo
+// normal de cancelamento em vez de limpar pendente.
+const NEG_FLUXO_FORTE = /(^|\b)(eu\s+)?n[aã]o\s+(quero|queria|vou|preciso|era pra)\s+(cancelar|que cancele|mais|isso)|^n[aã]o era pra\b|s[oó]\s+(pra|para)\s+(voc[eê]\s+)?saber|pra\s+voc[eê]\s+saber\s+apenas/i;
+const NEG_FLUXO_AMBIGUA = /^(esquece|deixa pra l[aá]|me confundi|confundi|percebi que)\b/i;
+
 function extrairTermoConsulta(msg) {
   let t = String(msg || '').trim()
     .replace(/[?!.]+$/, '')
@@ -465,6 +479,17 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
             }
           }
           return `Opa, só tem ${eventos.length} opções. Manda número entre 1 e ${eventos.length}.`;
+        }
+
+        // Bug L: NEG_FLUXO ANTES de matchHoje — frases negativas com "hoje"
+        // ("Eu não quero cancelar... hoje", "Percebi que hoje...") cairiam no
+        // path de seleção por dia (matchHoje). Causa-raiz primária do Bug L.
+        // FORTE dispara sozinho; AMBIGUA exige ausência de verbo imperativo.
+        const ehNegacaoFluxo = NEG_FLUXO_FORTE.test(mensagem) ||
+          (NEG_FLUXO_AMBIGUA.test(mensagem) && !RE_VERBO_IMPERATIVO_CALENDAR.test(mensagem));
+        if (ehNegacaoFluxo) {
+          await limparAcaoPendente(chatId);
+          return '✋ Ok, não cancelei nada. Se quiser outra coisa, é só pedir.';
         }
 
         // Match por dia: "o de hoje", "o de amanhã"
