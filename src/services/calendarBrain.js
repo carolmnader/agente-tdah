@@ -836,8 +836,12 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
     // Bug #11+#13: null é reservado pra "não é calendar" (path intencional).
     // Erro de infra propaga — catch-all do brain.js diferencia o tipo e responde direto.
     const { CalendarOperationError, CalendarInsertError } = require('../integrations/calendar');
-    console.error('[CalendarBrain] Erro:', { name: e.name, message: e.message, stack: e.stack });
+    console.error('[CalendarBrain] Erro:', { name: e.name, message: e.message, type: e?.error?.type, status: e?.status, stack: e.stack });
     if (e instanceof CalendarInsertError || e instanceof CalendarOperationError) throw e;
+    // Bug J: erros Anthropic SDK sobem intactos pra classifyBrainError detectar
+    // invalid_request_error / overloaded_error / rate_limit_error / authentication_error.
+    // Wrapper só é aplicado em erros sem assinatura Anthropic (googleapis, internos).
+    if (e?.error?.type) throw e;
     throw new CalendarOperationError(`Falha em processarCalendar: ${e.message}`, e);
   }
 };

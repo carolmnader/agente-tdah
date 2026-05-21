@@ -1,10 +1,13 @@
-// test-honestidade-fixes.js — testes de Bugs #11, #12, #13 (família Honestidade da ARIA).
+// test-honestidade-fixes.js — testes de Bugs #11, #12, #13, J (família Honestidade da ARIA).
 //
-// 4 cenários:
+// 7 cenários:
 //   H1) criarEvento com mock retornando sem data.id → throw CalendarInsertError
 //   H2) processarCalendar com intent consultar_evento + buscarEvento vazio → "Não achei"
 //   H3) classifyBrainError tipa erros corretamente (Anthropic 400, Calendar, Supabase, genérico)
 //   H4) processarCalendar propaga erro (não engole) quando fluxo interno lança
+//   H5) preClassificarConsulta — pega perguntas claras, ignora falsos positivos
+//   H6) Bug J: erro Anthropic dentro de processarCalendar PROPAGA intacto (.error.type preservado)
+//   H7) regressão zero: SyntaxError (não-Anthropic) continua virando CalendarOperationError
 //
 // Rodar: node test-honestidade-fixes.js
 require('dotenv').config();
@@ -258,6 +261,99 @@ function h5() {
 }
 
 // ────────────────────────────────────────────────────────
+// H6) Bug J: erro Anthropic dentro de processarCalendar PROPAGA intacto.
+//     Sem isso, classifyBrainError nunca vê .error.type e cai no branch errado
+//     ("Calendar não respondeu" em vez da string Anthropic específica).
+// ────────────────────────────────────────────────────────
+async function h6() {
+  delete require.cache[require.resolve('./src/services/calendarBrain')];
+
+  // Anthropic dispara erro com formato SDK real: { status, error: { type, message } }
+  const AnthropicCreditLowMock = function () {
+    return {
+      messages: {
+        create: async () => {
+          throw Object.assign(new Error('credit_low'), {
+            status: 400,
+            error: { type: 'invalid_request_error', message: 'Your credit balance is too low' }
+          });
+        },
+      },
+    };
+  };
+  mockModule('@anthropic-ai/sdk', AnthropicCreditLowMock);
+
+  const { processarCalendar } = require('./src/services/calendarBrain');
+
+  let pegou = null;
+  try {
+    await processarCalendar('agenda almoço amanhã às 13h', [], 999999996);
+  } catch (e) { pegou = e; }
+
+  assert(
+    pegou && pegou.error?.type === 'invalid_request_error',
+    'H6a) erro Anthropic dentro de processarCalendar sobe intacto (.error.type preservado)',
+    `pegou=${pegou?.constructor?.name} error.type=${pegou?.error?.type}`
+  );
+
+  // E o classifyBrainError downstream pega o branch certo
+  delete require.cache[require.resolve('./src/services/brain')];
+  const noop = () => ({});
+  const noopAsync = async () => null;
+  ['./src/services/memorySupabase', './src/services/obsidian', './src/services/selfImprove',
+   './src/modules/holistic', './src/integrations/astrology', './src/modules/ayurveda',
+   './src/prompts/holistic-context', './src/services/crm', './src/services/analytics',
+   './src/services/hipoteses', './src/services/sugestoes', './src/prompts/detectorPadroes',
+   './src/services/validadorImplicito']
+    .forEach(p => { try { mockModule(p, new Proxy({}, { get: () => noopAsync })); } catch {} });
+  const { classifyBrainError } = require('./src/services/brain');
+
+  assert(
+    /invalid_request_error|Saldo zerado/i.test(classifyBrainError(pegou)),
+    'H6b) classifyBrainError detecta invalid_request_error e devolve string Anthropic',
+    classifyBrainError(pegou)
+  );
+
+  assert(
+    !/Calendar n[aã]o respondeu/i.test(classifyBrainError(pegou)),
+    'H6c) string final NÃO é o fallback de Calendar (regressão Bug J)',
+    classifyBrainError(pegou)
+  );
+}
+
+// ────────────────────────────────────────────────────────
+// H7) Regressão zero: erro não-Anthropic (SyntaxError de JSON.parse)
+//     CONTINUA virando CalendarOperationError. Garante que a saída cirúrgica
+//     da Opção A (re-throw só se e.error.type) não desvia outros erros.
+// ────────────────────────────────────────────────────────
+async function h7() {
+  delete require.cache[require.resolve('./src/services/calendarBrain')];
+
+  // Anthropic OK, mas com texto que faz JSON.parse lançar SyntaxError (sem .error.type)
+  const AnthropicSyntaxMock = function () {
+    return {
+      messages: {
+        create: async () => ({ content: [{ text: 'nao-json {{{ ' }] }),
+      },
+    };
+  };
+  mockModule('@anthropic-ai/sdk', AnthropicSyntaxMock);
+
+  const { processarCalendar } = require('./src/services/calendarBrain');
+  const { CalendarOperationError } = require('./src/integrations/calendar');
+
+  let pegou = null;
+  try {
+    await processarCalendar('agenda almoço amanhã às 13h', [], 999999995);
+  } catch (e) { pegou = e; }
+  assert(
+    pegou && pegou instanceof CalendarOperationError,
+    'H7) SyntaxError continua virando CalendarOperationError (regressão de H4 preservada)',
+    `pegou=${pegou?.constructor?.name}: ${pegou?.message}`
+  );
+}
+
+// ────────────────────────────────────────────────────────
 // Runner
 // ────────────────────────────────────────────────────────
 (async () => {
@@ -267,6 +363,8 @@ function h5() {
     h3();
     await h4();
     h5();
+    await h6();
+    await h7();
     console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
     console.log(`✅ ${passed} passou  |  ❌ ${failed} falhou  (de ${passed + failed})`);
     process.exit(failed > 0 ? 1 : 0);
