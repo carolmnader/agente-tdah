@@ -29,6 +29,44 @@ async function tentarMarcarNotificado(eventoId, tipo = 'pre_evento_30min') {
 }
 
 /**
+ * Verifica se evento ja foi notificado, sem inserir.
+ * Use ANTES de tentar enviar a notificacao (check-then-act).
+ */
+async function jaNotificado(eventoId, tipo = 'pre_evento_30min') {
+  if (!eventoId) return false;
+  const { data, error } = await supabase
+    .from('eventos_notificados')
+    .select('evento_id')
+    .eq('evento_id', eventoId)
+    .eq('tipo_notificacao', tipo)
+    .maybeSingle();
+  if (error) {
+    console.error('[eventosNotificados] jaNotificado erro:', { code: error.code, message: error.message });
+    return false; // failsafe: prefere enviar 2x a nao enviar
+  }
+  return !!data;
+}
+
+/**
+ * Marca evento como notificado. Use APOS envio bem-sucedido.
+ * Retorna true se inseriu OU se ja existia (PK conflict = race tratada como sucesso).
+ */
+async function marcarNotificado(eventoId, tipo = 'pre_evento_30min') {
+  if (!eventoId) return false;
+  const { data, error } = await supabase
+    .from('eventos_notificados')
+    .insert({ evento_id: eventoId, tipo_notificacao: tipo })
+    .select()
+    .maybeSingle();
+  if (error) {
+    if (error.code === '23505') return true; // PK conflict = ja notificado (race), ok
+    console.error('[eventosNotificados] marcarNotificado erro:', { code: error.code, message: error.message });
+    return false;
+  }
+  return !!data;
+}
+
+/**
  * Limpeza diária: remove registros > 48h.
  */
 async function limparAntigos() {
@@ -45,4 +83,4 @@ async function limparAntigos() {
   return count || 0;
 }
 
-module.exports = { tentarMarcarNotificado, limparAntigos };
+module.exports = { tentarMarcarNotificado, jaNotificado, marcarNotificado, limparAntigos };

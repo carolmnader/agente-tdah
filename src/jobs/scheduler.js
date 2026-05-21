@@ -10,7 +10,7 @@ const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/ana
 const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt, buscarAprendizadosNaoNotificados, marcarComoNotificadas } = require('../services/hipoteses');
 const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
 const { proporSugestao } = require('../services/sugestoes');
-const { tentarMarcarNotificado, limparAntigos } = require('../services/eventosNotificados');
+const { jaNotificado, marcarNotificado, limparAntigos } = require('../services/eventosNotificados');
 const { snapshotMatinal } = require('../services/oura');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
@@ -36,6 +36,7 @@ FONTES (CRÍTICO — não inventar):
 - CONTEXTUAIS (pano de fundo, NÃO são agenda): memorias_relevantes, hipoteses_ativas. Use como observação ou cor, nunca como compromisso de hoje.
 - aprendizados_recentes: hipóteses recém-validadas sobre a Carol. Se o array tiver itens, INCLUA no briefing UM bloco destacado com marcador 🧠, no formato exato: "🧠 Algo que aprendi com certeza sobre você: [texto da hipótese de maior confiança]". Use só o primeiro item do array. Máximo 1 bloco por briefing. Se o array estiver vazio, não mencione nada.
 - Tipo "checkin_tarde": é check-in de meio do dia, hora específica no contexto. Tom Registro A (seca-poética) ou C (editorial-observadora), NUNCA maternal. Se há eventos_passados, pergunte factualmente sobre eles ("você tinha X, como foi?"). Se tarefas_pendentes tem itens, mencione uma específica sem cobrar. Se evento_proximo_30min não for null, seja breve (vai interromper). Se tudo vazio, só marque o momento ("tarde começando") sem forçar conversa.
+- Tipo "pre_evento": é lembrete de evento que começa em alguns minutos. Em "CONTEXTO" você recebe: evento (nome), hora (HH:MM BRT), em_minutos (número EXATO de minutos até começar), local. SEMPRE use em_minutos LITERALMENTE — ex: se em_minutos=28, escreva "em 28 minutos" ou "daqui a 28 minutos". NÃO arredonde pra 30. NÃO substitua por "logo", "em breve", "já já", "daqui a pouco". Se em_minutos for 0 ou 1, diga "Agora" ou "em 1 minuto". Use a hora literal (HH:MM). Tom Registro A (seca-poética) ou C (editorial-observadora). Mensagem CURTA — 1-3 linhas. Pode adicionar 1 detalhe contextual (item a trazer, deslocamento). Se local for "não especificado", omita.
 - Se agenda_do_dia estiver vazia ou ausente, diga literalmente "agenda livre hoje" ou similar. NÃO mencione exercício, estudo, reunião ou outros compromissos a menos que estejam em agenda_do_dia.
 
 Regras desta mensagem:
@@ -180,8 +181,10 @@ const jobCheckinTarde = async (hora) => {
 const jobPreEvento = async () => {
   try {
     const agora = new Date();
-    const em30min = new Date(agora.getTime() + 30 * 60000);
-    const em31min = new Date(agora.getTime() + 31 * 60000);
+    // Janela alargada 25-35min (era 1min): cobre cadência cron-job.org de 5min com folga 200%.
+    // Dedup via eventos_notificados (jaNotificado check-then-act) previne duplicatas.
+    const em25min = new Date(agora.getTime() + 25 * 60000);
+    const em35min = new Date(agora.getTime() + 35 * 60000);
 
     const { google } = require('googleapis');
     const cal = google.calendar({ version: 'v3', auth: getAuthClient() });
@@ -193,8 +196,8 @@ const jobPreEvento = async () => {
       try {
         const res = await cal.events.list({
           calendarId: calId.trim(),
-          timeMin: em30min.toISOString(),
-          timeMax: em31min.toISOString(),
+          timeMin: em25min.toISOString(),
+          timeMax: em35min.toISOString(),
           singleEvents: true,
         });
 
@@ -205,34 +208,52 @@ const jobPreEvento = async () => {
         );
 
         for (const evento of eventos) {
-          // Dedup atomico: so notifica se for 1a vez pra este evento.id+tipo
-          const deveNotificar = await tentarMarcarNotificado(evento.id, 'pre_evento_30min');
-          if (!deveNotificar) {
-            console.log(`[Scheduler] Evento ${evento.id} ja notificado, pulando.`);
-            continue;
-          }
-
-          // Defesa em profundidade: all-day events (sem dateTime) ficam fora de "em X min"
-          if (!evento.start?.dateTime) continue;
-
-          const startMs = new Date(evento.start.dateTime).getTime();
-          const minutosReais = Math.max(0, Math.round((startMs - agora.getTime()) / 60000));
-          const hora = new Date(evento.start.dateTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
-
-          const msg = await gerarMensagemProativa({
-            tipo: 'pre_evento',
-            dados: {
-              evento: evento.summary,
-              hora: hora,
-              em_minutos: minutosReais,
-              local: evento.location || 'não especificado'
+          // Trade-off: 2 cron runs concorrentes podem enviar 2x (PK conflict no 2o INSERT).
+          // Aceitável receber 2x esporadicamente > NÃO receber. cron-job.org é HTTP sync.
+          // try/catch por evento: 1 evento ruim não interrompe os outros (T7).
+          try {
+            // Check-then-act: SELECT antes pra não trancar evento se envio falhar (Bug J ontem)
+            if (await jaNotificado(evento.id, 'pre_evento_30min')) {
+              console.log(`[Scheduler] Evento ${evento.id} ja notificado, pulando.`);
+              continue;
             }
-          });
-          await sendTelegramMessage(CAROL_CHAT_ID, msg);
-          console.log(`[Scheduler] ✅ Lembrete pré-evento: ${evento.summary} (em ${minutosReais}min)`);
+
+            // Defesa em profundidade: all-day events (sem dateTime) ficam fora de "em X min"
+            if (!evento.start?.dateTime) continue;
+
+            const startMs = new Date(evento.start.dateTime).getTime();
+            const minutosReais = Math.max(0, Math.round((startMs - agora.getTime()) / 60000));
+            const hora = new Date(evento.start.dateTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+
+            const msg = await gerarMensagemProativa({
+              tipo: 'pre_evento',
+              dados: {
+                evento: evento.summary,
+                hora: hora,
+                em_minutos: minutosReais,
+                local: evento.location || 'não especificado'
+              }
+            });
+            await sendTelegramMessage(CAROL_CHAT_ID, msg);
+            // INSERT só DEPOIS do envio bem-sucedido — saldo zerado ou Telegram down NÃO tranca evento
+            await marcarNotificado(evento.id, 'pre_evento_30min');
+            console.log(`[Scheduler] ✅ Lembrete pré-evento: ${evento.summary} (em ${minutosReais}min)`);
+          } catch (eventoErr) {
+            console.error('[Scheduler] ❌ pre-evento item:', {
+              name: eventoErr.name, message: eventoErr.message,
+              type: eventoErr?.error?.type, status: eventoErr?.status,
+              eventId: evento.id, calendarId: calId, stack: eventoErr.stack
+            });
+            // Nao re-throw: outros eventos do mesmo calendario continuam sendo processados
+          }
         }
       } catch(e) {
-        // Silencia erro de calendário individual
+        console.error('[Scheduler] ❌ pre-evento calendario:', {
+          name: e.name, message: e.message,
+          type: e?.error?.type, status: e?.status,
+          calendarId: calId, stack: e.stack
+        });
+        // Nao re-throw: outros calendarios continuam sendo processados no for externo
       }
     }
   } catch(e) {
