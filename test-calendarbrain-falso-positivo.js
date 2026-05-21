@@ -40,6 +40,16 @@ const CENARIOS = [
   { n: 15, msg: 'Tenho fome',                                bypass: false, preClass: null },
   { n: 16, msg: 'Tenho psicologo amanha',                    bypass: false, preClass: 'consultar_evento' }, // PRESERVAR
   { n: 17, msg: 'Tenho almoco com pais quinta',              bypass: false, preClass: 'consultar_evento' }, // PRESERVAR
+  // Bug K — Onda 1.7 anti-fato-passado ampliado (20/05 19:30 smoking gun)
+  { n: 18, msg: 'Não rolou exercício hoje',                  bypass: true,  preClass: null }, // smoking gun
+  { n: 19, msg: 'Não aconteceu o treino',                    bypass: true,  preClass: null },
+  { n: 20, msg: 'Não saí pra academia',                      bypass: true,  preClass: null },
+  { n: 21, msg: 'Pulei o yoga essa semana',                  bypass: true,  preClass: null },
+  { n: 22, msg: 'Não acordei a tempo pro psicólogo',         bypass: true,  preClass: null },
+  { n: 23, msg: 'Passei o dia sem academia',                 bypass: true,  preClass: null },
+  // Cenários OPOSTOS: verbo imperativo preserva (regressão zero da regra estrutural)
+  { n: 24, msg: 'Não rolou exercício ontem. Cancela o de amanhã.', bypass: false, preClass: null }, // "cancela" preserva
+  { n: 25, msg: 'Pulei yoga hoje, agenda amanhã 8h',         bypass: false, preClass: null }, // "agenda" preserva
 ];
 
 let passed = 0, failed = 0;

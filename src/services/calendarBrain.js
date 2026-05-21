@@ -95,7 +95,9 @@ const RE_FALSO_POSITIVO_TEM_ESTADO = /^\s*(n[aã]o\s+tenho\b|tenho\s+at[eé]\b|t
 // "Perdi", "Faltei" NÃO é intent de Calendar — é contexto narrativo. Combinada
 // com RE_VERBO_IMPERATIVO_CALENDAR pra preservar frases compostas
 // ("Não fui ao mercado. Agenda pra amanhã" → tem verbo imperativo → segue).
-const RE_FATO_PASSADO = /^\s*(n[aã]o\s+(fui|fiz|consegui|deu|cheguei|tive)|cheguei\s+tarde|esqueci|perdi|faltei)\b/i;
+// Bug K: lookahead `(?=$|\W)` em vez de `\b` final pra funcionar com chars
+// acentuados (ex: "saí" + espaço — `\b` falha entre `í` non-word e espaço non-word).
+const RE_FATO_PASSADO = /^\s*(n[aã]o\s+(fui|fiz|consegui|deu|cheguei|tive|rolou|aconteceu|sa[íi]|acordei)|cheguei\s+tarde|esqueci|perdi|faltei|pulei|passei\s+o\s+dia\s+sem|deixei\s+pra\s+l[aá]|acabei\s+n[aã]o|falhei|escapei|travei)(?=$|\W)/i;
 const RE_VERBO_IMPERATIVO_CALENDAR = /\b(cancela|cancelar|desmarca|desmarcar|tira|tirar|remove|adiciona|adicionar|marca|marcar|agenda|agendar|reagenda|reagendar|muda|mudar|move|mover|coloca|p[oõ]e|bota)\b/i;
 
 function extrairTermoConsulta(msg) {
