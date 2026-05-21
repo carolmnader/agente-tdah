@@ -205,7 +205,7 @@ Inicie SEMPRE com: 🌅 <b>Sábado</b> — weekly review
 Gere APENAS o texto da mensagem, sem explicações extras.`;
 
   const resp = await anthropic.messages.create({
-    model: 'claude-opus-4-5',
+    model: 'claude-opus-4-7',
     max_tokens: 2000,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
