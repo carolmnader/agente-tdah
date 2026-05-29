@@ -511,4 +511,4 @@ const proximoHorarioLivre = async (duracaoMinutos = 60) => {
   } catch(e) { return `❌ Erro: ${e.message}`; }
 };
 
-module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA, normalizarBusca, CalendarInsertError, CalendarOperationError };
+module.exports = { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, buscarEventosTodos, interpretarDataHora, getCalendar, getAuthClient, getCalendarId, getCalendarioInfo, detectarCalendario, detectarCategoria, CALENDARIOS, CALENDARIO_POR_NOME, CATEGORIAS, construirRRULE, CAP_PADRAO_RECORRENCIA, normalizarBusca, CalendarInsertError, CalendarOperationError };

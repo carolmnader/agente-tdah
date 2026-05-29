@@ -170,6 +170,37 @@ for (const c of CENARIOS_GUARD) {
   );
 }
 
+// ─── Commit 4 — contrato de export de ../integrations/calendar ───
+// Bug: getCalendarioInfo era usado no handler consultar_evento (calendarBrain
+// :741/:751) mas NÃO estava no module.exports → undefined cross-module →
+// TypeError síncrono mascarado como "Calendar não respondeu". Este assert trava
+// que todo símbolo que o calendarBrain desestrutura de calendar.js exista.
+// (calendar.js já é carregado via calendarBrain no topo deste arquivo; roda no
+//  gate determinístico com DOTENV_CONFIG_PATH apontando pro .env do repo pai.)
+const calendarMod = require('./src/integrations/calendar');
+const EXPORT_FUNCOES = [
+  'listarEventosHoje', 'listarEventosSemana', 'criarEvento', 'reagendarEvento',
+  'cancelarEvento', 'proximoHorarioLivre', 'buscarEvento', 'detectarCategoria',
+  'getAuthClient', 'getCalendarioInfo', 'construirRRULE',
+  'CalendarOperationError', 'CalendarInsertError',
+];
+const EXPORT_DADOS = ['CATEGORIAS', 'CAP_PADRAO_RECORRENCIA']; // objetos, não funções
+for (const sym of EXPORT_FUNCOES) {
+  check(`EXPORT) typeof calendar.${sym} === 'function'`,
+    typeof calendarMod[sym] === 'function',
+    `real=${typeof calendarMod[sym]}`);
+}
+for (const sym of EXPORT_DADOS) {
+  check(`EXPORT) calendar.${sym} definido`,
+    typeof calendarMod[sym] !== 'undefined',
+    `real=${typeof calendarMod[sym]}`);
+}
+// shape que o handler consultar_evento usa (info.emoji + info.nome)
+const _info = calendarMod.getCalendarioInfo('inexistente');
+check('EXPORT) getCalendarioInfo(x) retorna {nome,emoji}',
+  !!_info && typeof _info.nome === 'string' && typeof _info.emoji === 'string',
+  `real=${JSON.stringify(_info)}`);
+
 console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
 console.log(`✅ ${passed} passou  |  ❌ ${failed} falhou  (de ${passed + failed})`);
 process.exit(failed > 0 ? 1 : 0);
