@@ -157,6 +157,17 @@ function extrairTermoConsulta(msg) {
   return t.length >= 2 ? t : null;
 }
 
+// Captura o escopo temporal da pergunta (mesma lista de tokens que
+// extrairTermoConsulta descarta em :155). Usado pra filtrar consultar_evento
+// por janela. Sem token → null. Função PURA (não toca Date).
+// `(?=$|\W)` em vez de `\b` final: lição do Bug K — `\b` falha depois de char
+// acentuado ("amanhã" termina em ã, non-word → sem boundary antes de "?").
+const RE_PERIODO = /\b(hoje|amanh[ãa]|essa semana|nesta semana|na\s+(segunda|ter[çc]a|quarta|quinta|sexta|s[áa]bado|domingo))(?=$|\W)/i;
+function detectarPeriodo(msg) {
+  const match = String(msg || '').match(RE_PERIODO);
+  return match ? match[0].trim().toLowerCase() : null;
+}
+
 function preClassificarConsulta(msg) {
   if (!msg) return null;
   const m = String(msg).trim();
@@ -165,7 +176,7 @@ function preClassificarConsulta(msg) {
   if (!ehForte && !ehTem) return null;
   const termo = extrairTermoConsulta(m);
   if (!termo) return null;
-  return { acao: 'consultar_evento', evento_original: termo, raciocinio: 'pre-classificador JS (bypass Opus)' };
+  return { acao: 'consultar_evento', evento_original: termo, periodo: detectarPeriodo(m), raciocinio: 'pre-classificador JS (bypass Opus)' };
 }
 
 function dicaIntent(msg) {
@@ -206,6 +217,42 @@ const resolverDataHora = (data, hora) => {
   }
   return resultado;
 };
+
+// Filtro temporal de consultar_evento (Bug: "hoje" era ignorado). PURA —
+// recebe bounds por parâmetro, não chama Date.now. Trata all-day (start.date,
+// meia-noite LOCAL) e timed (start.dateTime). proximo = evento mais próximo
+// (menor start) entre os achados; naJanela = os dentro de [timeMin,timeMax].
+function parseInicioEvento(ev) {
+  const s = (ev && ev.start) || {};
+  if (s.dateTime) return new Date(s.dateTime);
+  if (s.date) return new Date(s.date + 'T00:00:00'); // all-day → 00:00 LOCAL
+  return null;
+}
+function classificarPorJanela(eventos, timeMin, timeMax) {
+  const comData = (eventos || [])
+    .map(ev => ({ ev, ini: parseInicioEvento(ev) }))
+    .filter(x => x.ini && !isNaN(x.ini.getTime()))
+    .sort((a, b) => a.ini - b.ini);
+  const naJanela = comData.filter(x => x.ini >= timeMin && x.ini <= timeMax).map(x => x.ev);
+  const proximo = comData.length ? comData[0].ev : null;
+  return { naJanela, proximo };
+}
+// Converte o token de período (cru) na janela [timeMin,timeMax]. Impura (usa
+// resolverDataHora/now); o handler chama isto e passa os bounds pra helper pura.
+function janelaDoPeriodo(periodo) {
+  const p = String(periodo || '').toLowerCase().trim();
+  const agora = new Date();
+  if (/semana/.test(p)) {
+    const timeMin = new Date(agora); timeMin.setHours(0, 0, 0, 0);
+    const timeMax = new Date(agora); timeMax.setDate(agora.getDate() + 7); timeMax.setHours(23, 59, 59, 999);
+    return { timeMin, timeMax };
+  }
+  const tok = p.replace(/^na\s+/, '').normalize('NFD').replace(new RegExp('[\\u0300-\\u036f]', 'g'), '');
+  const dia = resolverDataHora(tok, null);
+  const timeMin = new Date(dia); timeMin.setHours(0, 0, 0, 0);
+  const timeMax = new Date(dia); timeMax.setHours(23, 59, 59, 999);
+  return { timeMin, timeMax };
+}
 
 const buscarComSinonimos = async (termo, sinonimos = []) => {
   const apelidos = global.ariaMemoria.apelidos;
@@ -730,9 +777,23 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
     if (intent.acao === 'consultar_evento') {
       const termo = intent.evento_original || intent.titulo;
       if (!termo) return '📅 Qual evento você quer consultar?';
-      const eventos = await buscarComSinonimos(termo, intent.sinonimos_busca || []);
+      let eventos = await buscarComSinonimos(termo, intent.sinonimos_busca || []);
       if (!eventos.length) {
         return `❌ Não achei "<b>${termo}</b>" na agenda. Quer que eu crie?`;
+      }
+      // Escopo temporal (Bug: "hoje" era ignorado → devolvia o próximo dos 30d).
+      // Só filtra quando a pergunta trouxe período; sem período = atual, intocado.
+      if (intent.periodo) {
+        const { timeMin, timeMax } = janelaDoPeriodo(intent.periodo);
+        const { naJanela, proximo } = classificarPorJanela(eventos, timeMin, timeMax);
+        if (!naJanela.length) {
+          if (!proximo) return `❌ Não achei "<b>${termo}</b>" ${intent.periodo}.`;
+          const dP = new Date(proximo.start.dateTime || (proximo.start.date + 'T00:00:00'));
+          const diaP = dP.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+          const horaP = proximo.start.dateTime ? ' às ' + dP.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+          return `Você não tem ${termo} ${intent.periodo}. Próximo: ${proximo.summary} — ${diaP}${horaP}.`;
+        }
+        eventos = naJanela;
       }
       if (eventos.length > 1) {
         let txt = `Achei ${eventos.length} eventos com "<b>${termo}</b>":\n\n`;
@@ -930,4 +991,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, temSinalCalendar, sinalCalendarGuard, deveRebaixarPosOpus, RE_FATO_PASSADO, RE_FATO_PASSADO_POSITIVO, RE_VERBO_IMPERATIVO_CALENDAR, REGEX_HORARIO_TEXTO };
+module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, detectarPeriodo, classificarPorJanela, temSinalCalendar, sinalCalendarGuard, deveRebaixarPosOpus, RE_FATO_PASSADO, RE_FATO_PASSADO_POSITIVO, RE_VERBO_IMPERATIVO_CALENDAR, REGEX_HORARIO_TEXTO };

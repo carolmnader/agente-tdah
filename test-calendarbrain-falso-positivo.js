@@ -15,6 +15,7 @@ const {
   preClassificarConsulta,
   temSinalCalendar,
   deveRebaixarPosOpus,
+  classificarPorJanela,
   RE_FATO_PASSADO,
   RE_FATO_PASSADO_POSITIVO,
   RE_VERBO_IMPERATIVO_CALENDAR,
@@ -200,6 +201,46 @@ const _info = calendarMod.getCalendarioInfo('inexistente');
 check('EXPORT) getCalendarioInfo(x) retorna {nome,emoji}',
   !!_info && typeof _info.nome === 'string' && typeof _info.emoji === 'string',
   `real=${JSON.stringify(_info)}`);
+
+// ─── Commit 5 — escopo temporal em consultar_evento ───
+// Captura do período (preClassificarConsulta passa a trazer intent.periodo):
+const capP = preClassificarConsulta('Tenho psiquiatra hoje?');
+check('P1) "Tenho psiquiatra hoje?" → evento_original=psiquiatra',
+  capP && capP.evento_original === 'psiquiatra', `real=${JSON.stringify(capP)}`);
+check('P2) "Tenho psiquiatra hoje?" → periodo=hoje',
+  capP && capP.periodo === 'hoje', `real=${capP && capP.periodo}`);
+const capA = preClassificarConsulta('Tenho médico amanhã?');
+check('P3) "Tenho médico amanhã?" → periodo=amanhã',
+  capA && capA.periodo === 'amanhã', `real=${capA && capA.periodo}`);
+const capN = preClassificarConsulta('Quando é meu psiquiatra?');
+check('P4) "Quando é meu psiquiatra?" → periodo=null',
+  capN && capN.periodo === null, `real=${capN && capN.periodo}`);
+
+// classificarPorJanela (PURA — bounds por parâmetro, sem Date.now):
+const J_tMin = new Date('2026-05-29T00:00:00-03:00');
+const J_tMax = new Date('2026-05-29T23:59:59-03:00');
+const evDentro = { summary: 'Dentro', start: { dateTime: '2026-05-29T10:00:00-03:00' } };
+const evFora   = { summary: 'Fora',   start: { dateTime: '2026-06-24T15:00:00-03:00' } };
+const r1 = classificarPorJanela([evFora, evDentro], J_tMin, J_tMax);
+check('J1) dentro da janela → naJanela tem o do dia',
+  r1.naJanela.length === 1 && r1.naJanela[0].summary === 'Dentro', `real=${JSON.stringify(r1.naJanela.map(e=>e.summary))}`);
+const r2 = classificarPorJanela([evFora], J_tMin, J_tMax);
+check('J2) só fora → naJanela vazio + proximo=Fora',
+  r2.naJanela.length === 0 && r2.proximo && r2.proximo.summary === 'Fora', `real=${JSON.stringify(r2)}`);
+const r3 = classificarPorJanela([], J_tMin, J_tMax);
+check('J3) vazio → naJanela vazio + proximo=null',
+  r3.naJanela.length === 0 && r3.proximo === null);
+const J_julMin = new Date('2026-07-01T00:00:00-03:00');
+const J_julMax = new Date('2026-07-01T23:59:59-03:00');
+const r4 = classificarPorJanela([evFora, evDentro], J_julMin, J_julMax);
+check('J4) ambos fora → proximo é o mais cedo (Dentro 29/05), não ordem do array',
+  r4.naJanela.length === 0 && r4.proximo && r4.proximo.summary === 'Dentro', `real=${r4.proximo && r4.proximo.summary}`);
+const J_localMin = new Date(2026, 4, 29, 0, 0, 0, 0);
+const J_localMax = new Date(2026, 4, 29, 23, 59, 59, 999);
+const evAllDay = { summary: 'AllDay', start: { date: '2026-05-29' } };
+const r5 = classificarPorJanela([evAllDay], J_localMin, J_localMax);
+check('J5) all-day no dia → naJanela (start.date tratado como 00:00 LOCAL)',
+  r5.naJanela.length === 1 && r5.naJanela[0].summary === 'AllDay', `real=${JSON.stringify(r5.naJanela.map(e=>e.summary))}`);
 
 console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
 console.log(`✅ ${passed} passou  |  ❌ ${failed} falhou  (de ${passed + failed})`);
