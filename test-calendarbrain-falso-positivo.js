@@ -14,11 +14,20 @@ require('dotenv').config();
 const {
   preClassificarConsulta,
   RE_FATO_PASSADO,
+  RE_FATO_PASSADO_POSITIVO,
   RE_VERBO_IMPERATIVO_CALENDAR,
+  REGEX_HORARIO_TEXTO,
 } = require('./src/services/calendarBrain');
 
 function deveByPassFatoPassado(msg) {
   return RE_FATO_PASSADO.test(msg) && !RE_VERBO_IMPERATIVO_CALENDAR.test(msg);
+}
+
+// Commit 1 — Sabor A: relato de passado POSITIVO. Espelha o guard de :449.
+function deveByPassRelatoPositivo(msg) {
+  return RE_FATO_PASSADO_POSITIVO.test(msg)
+    && !RE_VERBO_IMPERATIVO_CALENDAR.test(msg)
+    && !REGEX_HORARIO_TEXTO.test(msg);
 }
 
 const CENARIOS = [
@@ -76,6 +85,30 @@ for (const c of CENARIOS) {
     `C${c.n}) "${c.msg.substring(0, 50)}" preClass=${c.preClass}`,
     okPreClass,
     `esperado=${c.preClass} real=${preRealAcao}`
+  );
+}
+
+// ─── Commit 1 — Sabor A: relato de passado POSITIVO não vira criar ───
+const CENARIOS_RELATO_POSITIVO = [
+  { n: 'A1', msg: 'Fiz yoga e musculação',        bypass: true  },
+  { n: 'A2', msg: 'Musculação fiz',                bypass: true  }, // verbo no fim (objeto antes)
+  { n: 'A3', msg: 'Terminei o Archicad',           bypass: true  },
+  { n: 'A4', msg: 'Fui pra academia hoje',         bypass: true  }, // "hoje" não é hora explícita
+  { n: 'A5', msg: 'Consegui acordar cedo',         bypass: true  },
+  { n: 'A6', msg: 'Já fiz a reunião',              bypass: true  },
+  { n: 'A7', msg: 'Completei o projeto ontem',     bypass: true  },
+  // Guardas (regressão zero): imperativo e/ou hora preservam a criação
+  { n: 'A8', msg: 'Agenda yoga que fiz',           bypass: false }, // "agenda" imperativo
+  { n: 'A9', msg: 'Fiz yoga, marca amanhã 8h',     bypass: false }, // "marca" imperativo + hora
+  { n: 'A10', msg: 'Adiciona musculação',          bypass: false }, // não é passado
+  { n: 'A11', msg: 'Cancela exercicio de amanha',  bypass: false }, // não é passado positivo
+];
+for (const c of CENARIOS_RELATO_POSITIVO) {
+  const real = deveByPassRelatoPositivo(c.msg);
+  check(
+    `${c.n}) "${c.msg.substring(0, 50)}" relato_positivo_bypass=${c.bypass}`,
+    real === c.bypass,
+    `esperado=${c.bypass} real=${real}`
   );
 }
 

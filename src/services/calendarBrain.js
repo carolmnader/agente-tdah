@@ -100,6 +100,15 @@ const RE_FALSO_POSITIVO_TEM_ESTADO = /^\s*(n[aã]o\s+tenho\b|tenho\s+at[eé]\b|t
 const RE_FATO_PASSADO = /^\s*(n[aã]o\s+(fui|fiz|consegui|deu|cheguei|tive|rolou|aconteceu|sa[íi]|acordei)|cheguei\s+tarde|esqueci|perdi|faltei|pulei|passei\s+o\s+dia\s+sem|deixei\s+pra\s+l[aá]|acabei\s+n[aã]o|falhei|escapei|travei)(?=$|\W)/i;
 const RE_VERBO_IMPERATIVO_CALENDAR = /\b(cancela|cancelar|desmarca|desmarcar|tira|tirar|remove|adiciona|adicionar|marca|marcar|agenda|agendar|reagenda|reagendar|muda|mudar|move|mover|coloca|p[oõ]e|bota)\b/i;
 
+// Sabor A: relato de atividade JÁ FEITA (passado POSITIVO) não é intent de
+// Calendar — "Fiz yoga", "Musculação fiz", "Terminei o Archicad", "Fui pra
+// academia". RE_FATO_PASSADO (Bug K) só cobria o NEGATIVO ("não fiz/fui").
+// Mesmo boundary `(?=$|\W)` do Bug K (chars acentuados). O grupo opcional
+// `(\S+\s+)?` tolera UM objeto antes do verbo ("Musculação fiz" → verbo no fim).
+// Pareado no guard com !imperativo (preserva "Agenda yoga que fiz") e !horário
+// explícito ("Fiz yoga às 8h" é ambíguo → deixa Opus decidir).
+const RE_FATO_PASSADO_POSITIVO = /^\s*(\S+\s+)?(fiz|fez|fizemos|fui|fomos|terminei|completei|consegui|acabei\s+de|j[áa]\s+(fiz|fui|terminei))(?=$|\W)/i;
+
 // Bug L: negação CLARA do fluxo de cancelamento, dividida em 2 níveis.
 //
 // FORTE: padrão por si só inequívoco — "não quero cancelar" / "não era pra
@@ -448,6 +457,16 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
     // como intent de cancelar.
     if (RE_FATO_PASSADO.test(mensagem) && !RE_VERBO_IMPERATIVO_CALENDAR.test(mensagem)) {
       console.log(`📅 [CalendarBrain] Fato passado detectado, bypass Opus: "${mensagem.substring(0, 60)}"`);
+      return null;
+    }
+
+    // Sabor A: relato de passado POSITIVO ("Fiz yoga", "Musculação fiz") também
+    // é narrativa, não intent de criar. !imperativo preserva "Agenda yoga que
+    // fiz"; !horário deixa "Fiz yoga às 8h" (ambíguo) pro Opus.
+    if (RE_FATO_PASSADO_POSITIVO.test(mensagem)
+        && !RE_VERBO_IMPERATIVO_CALENDAR.test(mensagem)
+        && !REGEX_HORARIO_TEXTO.test(mensagem)) {
+      console.log(`📅 [CalendarBrain] Relato (passado positivo), bypass Opus: "${mensagem.substring(0, 60)}"`);
       return null;
     }
 
@@ -873,4 +892,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, RE_FATO_PASSADO, RE_VERBO_IMPERATIVO_CALENDAR };
+module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, RE_FATO_PASSADO, RE_FATO_PASSADO_POSITIVO, RE_VERBO_IMPERATIVO_CALENDAR, REGEX_HORARIO_TEXTO };
