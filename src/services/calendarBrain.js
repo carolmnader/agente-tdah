@@ -21,7 +21,7 @@ const EMOJIS_CATEGORIA = {
   academia: '💪', treino: '💪', gym: '💪', exercicio: '💪', exercício: '💪',
   yoga: '🧘', pilates: '🧘', corrida: '🏃',
   medico: '🏥', médico: '🏥', dentista: '🦷', psicologo: '🧠', psicólogo: '🧠',
-  terapia: '🧠', consulta: '🏥', exame: '🏥',
+  psiquiatra: '🧠', terapia: '🧠', consulta: '🏥', exame: '🏥',
   almoco: '🍽️', almoço: '🍽️', jantar: '🍷', cafe: '☕', café: '☕',
   aeroporto: '✈️', voo: '✈️', viagem: '✈️', embarque: '✈️',
   salao: '💅', salão: '💅', unhas: '💅', make: '💄', cabelo: '💇', beleza: '💅',
@@ -81,14 +81,20 @@ const REGEX_ESSA_SEMANA = /\b(essa|esta|nessa|nesta)\s+semana\b/i;
 // nao_e_calendar e responder do histórico (Bug #12 confirmado em prod 04/05).
 const RE_CONSULTA_FORTE = /^\s*(que horas|a que horas|quando)\b/i;
 const RE_CONSULTA_TEM = /^\s*(tem|tenho)\b/i;
-const RE_FALSO_POSITIVO_TEM = /^\s*(tenho que|tenho de|tem que|tem de|tenho um\b|tenho uma\b|tenho mil|tenho (ideia|vontade|certeza|raiva|medo|fome|sono)|tem (gente|alguém|alguem|algo|comida|certeza|jeito|ideia))/i;
-
-// Onda 1.6 commit 1.5: declarativos de disponibilidade/estado/sentimento/negacao
-// que comecam com "tenho" mas NAO sao consulta de evento.
-// Bug 12:09 18/05: "Tenho ate as 17h livre. Depois quero..." virava
-// consultar_evento(termo="ate as 17h livre"). Precisa bypass.
-// Preserva consultas legitimas ("tenho psicologo amanha", "tenho almoco quinta").
-const RE_FALSO_POSITIVO_TEM_ESTADO = /^\s*(n[aã]o\s+tenho\b|tenho\s+at[eé]\b|tenho\s+\w+\s+livre\b|tenho\s+(tempo|sede|preguic[ca]|saudade|raz[aã]o|d[uú]vida|duvida))\b/i;
+// Sabor B-JS: "tem/tenho" só vira consulta se a frase NOMEAR um evento.
+// Antes era denylist (RE_FALSO_POSITIVO_TEM*) — whack-a-mole que furava em
+// "Tenho contato de desenhista" e "Tenho usado música clássica pra trabalhar".
+// Agora é allowlist: reusa o vocabulário de agenda já existente
+// (EMOJIS_CATEGORIA, fonte única), sem criar lista nova. Marcador temporal
+// sozinho NÃO basta — "Tenho até as 17h livre" tem "17h" mas não nomeia evento.
+const RE_SUBSTANTIVO_AGENDA = new RegExp(
+  '\\b(' + Object.keys(EMOJIS_CATEGORIA).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')\\b',
+  'i'
+);
+function temSinalCalendar(msg) {
+  if (!msg) return false;
+  return RE_SUBSTANTIVO_AGENDA.test(String(msg).toLowerCase());
+}
 
 // Onda 1.6 Opção C: bypass do Opus pra declarações de fato passado.
 // Frase começando com "Não fui/fiz/consegui/...", "Esqueci", "Cheguei tarde",
@@ -138,9 +144,7 @@ function preClassificarConsulta(msg) {
   if (!msg) return null;
   const m = String(msg).trim();
   const ehForte = RE_CONSULTA_FORTE.test(m);
-  const ehTem = RE_CONSULTA_TEM.test(m)
-    && !RE_FALSO_POSITIVO_TEM.test(m)
-    && !RE_FALSO_POSITIVO_TEM_ESTADO.test(m);
+  const ehTem = RE_CONSULTA_TEM.test(m) && temSinalCalendar(m);
   if (!ehForte && !ehTem) return null;
   const termo = extrairTermoConsulta(m);
   if (!termo) return null;
@@ -892,4 +896,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, RE_FATO_PASSADO, RE_FATO_PASSADO_POSITIVO, RE_VERBO_IMPERATIVO_CALENDAR, REGEX_HORARIO_TEXTO };
+module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, temSinalCalendar, RE_FATO_PASSADO, RE_FATO_PASSADO_POSITIVO, RE_VERBO_IMPERATIVO_CALENDAR, REGEX_HORARIO_TEXTO };

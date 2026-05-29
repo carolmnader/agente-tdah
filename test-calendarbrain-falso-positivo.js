@@ -13,6 +13,7 @@ require('dotenv').config();
 
 const {
   preClassificarConsulta,
+  temSinalCalendar,
   RE_FATO_PASSADO,
   RE_FATO_PASSADO_POSITIVO,
   RE_VERBO_IMPERATIVO_CALENDAR,
@@ -111,6 +112,35 @@ for (const c of CENARIOS_RELATO_POSITIVO) {
     `esperado=${c.bypass} real=${real}`
   );
 }
+
+// ─── Commit 2 — Sabor B-JS: "Tenho" allowlist via temSinalCalendar ───
+const CENARIOS_TENHO = [
+  // matar: declarativa sem substantivo de agenda
+  { n: 'B1', msg: 'Tenho contato de desenhista',               preClass: null },
+  { n: 'B2', msg: 'Tenho',                                     preClass: null },
+  { n: 'B3', msg: 'Tenho usado música clássica pra trabalhar', preClass: null },
+  // preservar: nomeia um evento (substantivo de agenda)
+  { n: 'B4', msg: 'Tenho psicólogo hoje?',                     preClass: 'consultar_evento' },
+  { n: 'B5', msg: 'Tenho reunião amanhã?',                     preClass: 'consultar_evento' },
+  { n: 'B6', msg: 'Tem academia hoje?',                        preClass: 'consultar_evento' },
+  { n: 'B10', msg: 'Tenho psiquiatra hoje?',                   preClass: 'consultar_evento' }, // Bressan — psiquiatra ∈ vocab
+];
+for (const c of CENARIOS_TENHO) {
+  const pre = preClassificarConsulta(c.msg);
+  const acao = pre ? pre.acao : null;
+  check(
+    `${c.n}) "${c.msg.substring(0, 50)}" preClass=${c.preClass}`,
+    acao === c.preClass,
+    `esperado=${c.preClass} real=${acao}`
+  );
+}
+// temSinalCalendar direto: substantivo obrigatório, temporal sozinho não basta
+check('B7) temSinalCalendar("Tenho reunião amanhã")===true',
+  temSinalCalendar('Tenho reunião amanhã') === true);
+check('B8) temSinalCalendar("Tenho até as 17h livre")===false (só temporal)',
+  temSinalCalendar('Tenho até as 17h livre') === false);
+check('B9) temSinalCalendar("Tenho contato de desenhista")===false',
+  temSinalCalendar('Tenho contato de desenhista') === false);
 
 console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
 console.log(`✅ ${passed} passou  |  ❌ ${failed} falhou  (de ${passed + failed})`);
