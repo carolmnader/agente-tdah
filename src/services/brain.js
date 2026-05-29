@@ -628,7 +628,7 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
       name: error?.constructor?.name || error?.name,
       message: error?.message,
       status: error?.status,
-      type: error?.error?.type,
+      type: error?.type,
       cause: error?.cause?.message,
       stack: error?.stack,
     });
@@ -652,7 +652,7 @@ function _temCausaDeCodigo(err, depth = 0) {
 // Bug #13: roteador puro de erro → fallback. Pure function, fácil de testar.
 // Duck-typing (não instanceof) pra ser robusto a versão do SDK Anthropic.
 function classifyBrainError(error) {
-  const anthropicType = error?.error?.type;
+  const anthropicType = error?.type;
   if (anthropicType === 'invalid_request_error') {
     return 'Carol, API Anthropic retornou invalid_request_error. Saldo zerado? Verifica console.anthropic.com/settings/billing.';
   }
