@@ -115,6 +115,23 @@ const RE_VERBO_IMPERATIVO_CALENDAR = /\b(cancela|cancelar|desmarca|desmarcar|tir
 // explícito ("Fiz yoga às 8h" é ambíguo → deixa Opus decidir).
 const RE_FATO_PASSADO_POSITIVO = /^\s*(\S+\s+)?(fiz|fez|fizemos|fui|fomos|terminei|completei|consegui|acabei\s+de|j[áa]\s+(fiz|fui|terminei))(?=$|\W)/i;
 
+// Sabor B/C: guard determinístico pós-Opus (cinto — a camada primária é a
+// moldura positiva do PROMPT_INTENT). Uma intent de consulta/criar só sobrevive
+// se a mensagem tem ALGUM sinal de calendar: substantivo de agenda OU verbo
+// imperativo OU hora explícita. Sem nenhum → era declarativa/resposta
+// ("Bressan o nome dele"). Declarativa COM noun ("vou ter meu psiquiatra/
+// psicólogo amanhã") tem sinal → guard NÃO rebaixa; quem pega é o PROMPT.
+// Sinal de propósito mais largo que temSinalCalendar (noun-only): "agenda
+// manicure às 15h" tem verbo+hora e deve criar mesmo com noun fora do vocabulário.
+const ACOES_EXIGEM_SINAL = ['consultar_evento', 'criar', 'criar_lote', 'criar_recorrente'];
+function sinalCalendarGuard(msg) {
+  const m = String(msg || '');
+  return temSinalCalendar(m) || RE_VERBO_IMPERATIVO_CALENDAR.test(m) || REGEX_HORARIO_TEXTO.test(m);
+}
+function deveRebaixarPosOpus(acao, msg) {
+  return ACOES_EXIGEM_SINAL.includes(acao) && !sinalCalendarGuard(msg);
+}
+
 // Bug L: negação CLARA do fluxo de cancelamento, dividida em 2 níveis.
 //
 // FORTE: padrão por si só inequívoco — "não quero cancelar" / "não era pra
@@ -384,6 +401,14 @@ EXEMPLOS DE CONSULTAR EVENTO:
 - "a que horas é meu treino hoje?" → acao: consultar_evento, evento_original: "treino"
 - (NÃO confundir) "agenda almoço amanhã às 13h" → acao: criar (verbo de criação)
 - (NÃO confundir) "muda almoço pra 14h" → acao: reagendar (verbo de mudança)
+
+11. NÃO-CALENDAR (declarativas/respostas): classifique como consulta ou criar SOMENTE quando houver sinal de calendar — verbo de agenda (agenda/marca/cancela/reagenda/move), horário/data, OU um evento nomeado a buscar. Declaração de fato, opinião, resposta conversacional ou continuação de papo NÃO é calendar → acao: nao_e_calendar. Na dúvida sem sinal, prefira nao_e_calendar (o histórico não é fonte factual).
+
+EXEMPLOS DE NÃO-CALENDAR:
+- "Bressan o nome dele" → acao: nao_e_calendar (resposta conversacional, sem verbo/hora/evento)
+- "Agora vou ter meu psiquiatra Bressan" → acao: nao_e_calendar (declarativa "vou ter", não é pedido de agendar)
+- "Tô indo pro mercado" / "fui no salão" → acao: nao_e_calendar (relato, não comando)
+- "Tenho usado música pra focar" → acao: nao_e_calendar (narrativa, não consulta)
 
 EXEMPLOS DE MUDAR CALENDÁRIO:
 - "muda categoria para Saúde" → acao: mudar_calendario, calendario: "Saúde", evento_original: último evento mencionado
@@ -685,6 +710,15 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       mem.apelidos[intent.apelido_aprendido.termo.toLowerCase()] = intent.apelido_aprendido.evento_real;
     }
 
+    // Sabor B/C — guard pós-Opus (cinto): consulta/criar sem nenhum sinal de
+    // calendar é declarativa/resposta mal-classificada → nao_e_calendar.
+    // Também resolve o Sabor C: sem sinal não chama Calendar, some o
+    // "Calendar não respondeu" de declarativas como "vou ter meu psiquiatra".
+    if (deveRebaixarPosOpus(intent.acao, mensagem)) {
+      console.log(`📅 [CalendarBrain] Guard pós-Opus: "${intent.acao}" sem sinal de calendar → nao_e_calendar: "${mensagem.substring(0, 60)}"`);
+      return null;
+    }
+
     if (intent.acao === 'nao_e_calendar') return null;
 
     // VER
@@ -896,4 +930,4 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
   }
 };
 
-module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, temSinalCalendar, RE_FATO_PASSADO, RE_FATO_PASSADO_POSITIVO, RE_VERBO_IMPERATIVO_CALENDAR, REGEX_HORARIO_TEXTO };
+module.exports = { processarCalendar, dicaIntent, resolverDataHora, preClassificarConsulta, extrairTermoConsulta, temSinalCalendar, sinalCalendarGuard, deveRebaixarPosOpus, RE_FATO_PASSADO, RE_FATO_PASSADO_POSITIVO, RE_VERBO_IMPERATIVO_CALENDAR, REGEX_HORARIO_TEXTO };

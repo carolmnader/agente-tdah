@@ -14,6 +14,7 @@ require('dotenv').config();
 const {
   preClassificarConsulta,
   temSinalCalendar,
+  deveRebaixarPosOpus,
   RE_FATO_PASSADO,
   RE_FATO_PASSADO_POSITIVO,
   RE_VERBO_IMPERATIVO_CALENDAR,
@@ -141,6 +142,33 @@ check('B8) temSinalCalendar("Tenho até as 17h livre")===false (só temporal)',
   temSinalCalendar('Tenho até as 17h livre') === false);
 check('B9) temSinalCalendar("Tenho contato de desenhista")===false',
   temSinalCalendar('Tenho contato de desenhista') === false);
+
+// ─── Commit 3 — Sabor B/C: guard pós-Opus exige sinal de calendar ───
+const CENARIOS_GUARD = [
+  // rebaixa: Opus classificou consulta/criar mas a msg não tem NENHUM sinal
+  { n: 'BC1',  acao: 'consultar_evento', msg: 'Bressan o nome dele',       rebaixa: true  },
+  { n: 'BC2',  acao: 'criar',            msg: 'isso mesmo, é o nome dele',  rebaixa: true  }, // resposta sem noun → guard pega
+  { n: 'BC3',  acao: 'consultar_evento', msg: 'o nome dele é Bressan',      rebaixa: true  },
+  // divisão de trabalho: declarativa COM noun (psiquiatra ∈ vocab) → guard NÃO
+  // rebaixa; quem mata é o PROMPT (few-shot da declarativa). Não-determinístico
+  // testar o prompt, mas TRAVAMOS aqui que o guard deixa passar (igual psicólogo).
+  { n: 'BC2b', acao: 'criar',            msg: 'Agora vou ter meu psiquiatra Bressan', rebaixa: false },
+  // NÃO rebaixa: tem sinal (noun de agenda, verbo imperativo, ou hora)
+  { n: 'BC4',  acao: 'criar',            msg: 'agenda manicure às 15h',     rebaixa: false }, // imperativo+hora, noun fora do vocab
+  { n: 'BC5',  acao: 'consultar_evento', msg: 'que horas é o psicólogo?',   rebaixa: false }, // noun
+  { n: 'BC6',  acao: 'criar',            msg: 'marca 14h',                  rebaixa: false }, // hora
+  // ações fora do conjunto gated nunca rebaixam (mesmo sem sinal)
+  { n: 'BC7',  acao: 'ver_hoje',         msg: 'oi tudo bem?',               rebaixa: false },
+  { n: 'BC8',  acao: 'cancelar',         msg: 'Bressan o nome dele',        rebaixa: false },
+];
+for (const c of CENARIOS_GUARD) {
+  const real = deveRebaixarPosOpus(c.acao, c.msg);
+  check(
+    `${c.n}) [${c.acao}] "${c.msg.substring(0, 40)}" rebaixa=${c.rebaixa}`,
+    real === c.rebaixa,
+    `esperado=${c.rebaixa} real=${real}`
+  );
+}
 
 console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
 console.log(`✅ ${passed} passou  |  ❌ ${failed} falhou  (de ${passed + failed})`);
