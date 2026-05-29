@@ -639,6 +639,16 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
   }
 }
 
+// Anda a cadeia de .cause procurando erro de CÓDIGO (TypeError/ReferenceError/
+// RangeError/SyntaxError) — distingue bug interno (que hoje era mascarado como
+// "Calendar não respondeu") de falha real do Google. Viola "nunca mente" dizer
+// que o Calendar caiu quando foi o código que quebrou.
+function _temCausaDeCodigo(err, depth = 0) {
+  if (!err || depth > 5) return false;
+  if (err instanceof TypeError || err instanceof ReferenceError || err instanceof RangeError || err instanceof SyntaxError) return true;
+  return _temCausaDeCodigo(err.cause, depth + 1);
+}
+
 // Bug #13: roteador puro de erro → fallback. Pure function, fácil de testar.
 // Duck-typing (não instanceof) pra ser robusto a versão do SDK Anthropic.
 function classifyBrainError(error) {
@@ -659,6 +669,10 @@ function classifyBrainError(error) {
     return `Carol, erro Anthropic ${error?.status || '?'}: ${anthropicType}. Olha o log.`;
   }
   if (error?.name === 'CalendarOperationError' || error?.name === 'CalendarInsertError') {
+    if (_temCausaDeCodigo(error.cause)) {
+      console.error('[classifyBrainError] ERRO DE CODIGO mascarado como Calendar:', { name: error.cause?.name, message: error.cause?.message, stack: error.cause?.stack });
+      return 'Opa — tropecei num erro interno meu agora, não foi o Calendar. Já registrei aqui pra investigar. Tenta de novo daqui a pouco? 💜';
+    }
     return '📅 Calendar não respondeu agora. Tenta de novo daqui a pouco.';
   }
   if (error?.code?.startsWith?.('PGRST') || /supabase/i.test(error?.message || '')) {
