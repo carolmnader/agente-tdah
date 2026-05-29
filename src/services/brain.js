@@ -7,7 +7,26 @@ const { getFaseLunar, getContextoAstrologico } = require('../integrations/astrol
 const { getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holistic-context');
 const { processarCalendar } = require('./calendarBrain');
-const { getBrtNow } = require('../utils/time');
+const { getBrtNow, montarBlocoAgenda } = require('../utils/time');
+const { buscarEventosTodos } = require('../integrations/calendar');
+
+/**
+ * Monta bloco "AGENDA REAL DE HOJE" pra injetar no system prompt reativo.
+ * Replica janela 00:00-23:59:59 do dia (mesmo padrao do listarEventosHoje em
+ * integrations/calendar.js — herda comportamento de TZ que ja roda em prod).
+ * Falha silenciosa (null) se Calendar API estiver fora — padrao Oura.
+ */
+async function blocoAgendaReativo(now) {
+  try {
+    const inicio = new Date(now); inicio.setHours(0,0,0,0);
+    const fim = new Date(now); fim.setHours(23,59,59,999);
+    const eventos = await buscarEventosTodos(inicio, fim);
+    return montarBlocoAgenda(eventos, now);
+  } catch (e) {
+    console.error('[agenda-reativa] Calendar falhou:', e?.message);
+    return null;
+  }
+}
 const { buscarPessoaInteligente, formatarPessoa, salvarOuAtualizarPessoa, buildPessoasContextoMensagem } = require('./crm');
 const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
 const { hipotesesParaPrompt, listarHipotesesValidadas } = require('./hipoteses');
@@ -231,7 +250,9 @@ Meta 2026: ${meta}`;
     ? `\n━━━ O QUE VOCÊ APRENDEU SOBRE CAROL ━━━\n${hipotesesAtivas.map(h => `- ${h.texto} (confiança: ${parseFloat(h.confianca).toFixed(2)})`).join('\n')}\n\nUse essas hipóteses pra contextualizar, não repeti-las de volta. Não invente novas aqui.`
     : '';
 
-  const agora = getBrtNow();
+  const now = new Date();
+  const agora = getBrtNow(now);
+  const blocoAgenda = await blocoAgendaReativo(now);
 
   const systemWithMemory = `${SYSTEM_PROMPT}${blocoHipoteses}
 ${profileContext}
@@ -250,7 +271,7 @@ Hora: ${agora.hora} BRT
 Dia: ${agora.diaSemana}, ${agora.dataBR}
 Período: ${agora.periodo}
 Use essa âncora pra qualquer referência temporal (saudações, "hoje", "agora", "ontem"). NUNCA chute período por contexto.
-
+${blocoAgenda ? `\n${blocoAgenda}\n` : ''}
 ━━━ INSTRUÇÃO DESTA RESPOSTA ━━━
 Estratégia: ${strategy.name}
 ${strategy.instruction}
@@ -661,7 +682,9 @@ async function thinkWithImage(message, imageContent) {
       profileContext = `\n━━━ QUEM É A CAROL ━━━\n${carolProfile.profile?.preferred_name || 'Carol'}, ${carolProfile.profile?.profession || 'Arquiteta'}`;
     }
 
-    const agora = getBrtNow();
+    const now = new Date();
+    const agora = getBrtNow(now);
+    const blocoAgenda = await blocoAgendaReativo(now);
 
     const systemWithMemory = `${SYSTEM_PROMPT}
 ${profileContext}
@@ -677,7 +700,7 @@ Hora: ${agora.hora} BRT
 Dia: ${agora.diaSemana}, ${agora.dataBR}
 Período: ${agora.periodo}
 Use essa âncora pra qualquer referência temporal (saudações, "hoje", "agora", "ontem"). NUNCA chute período por contexto.
-
+${blocoAgenda ? `\n${blocoAgenda}\n` : ''}
 ━━━ INSTRUÇÃO ━━━
 Carol enviou uma imagem. Analise visualmente e responda de forma útil, conectando com o contexto dela se relevante.`;
 

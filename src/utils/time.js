@@ -34,4 +34,52 @@ function getBrtNow(date = new Date()) {
   return { hora, diaSemana, dataBR, horaNum, periodo };
 }
 
-module.exports = { getBrtNow, TIMEZONE };
+/**
+ * Calcula minutos entre agora e o startISO de um evento.
+ * Negativo se evento ja passou. Retorna integer arredondado.
+ */
+function minutosAteEvento(startISO, now = new Date()) {
+  return Math.round((new Date(startISO).getTime() - now.getTime()) / 60000);
+}
+
+function _fmtHora(iso) {
+  return new Date(iso).toLocaleTimeString('pt-BR', {
+    timeZone: TIMEZONE, hour: '2-digit', minute: '2-digit', hour12: false
+  });
+}
+
+function _fmtFalta(min) {
+  if (min <= 0) return 'agora';
+  if (min < 60) return `em ${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m === 0 ? `em ${h}h` : `em ${h}h${String(m).padStart(2, '0')}`;
+}
+
+/**
+ * Monta bloco textual "AGENDA REAL DE HOJE" pra injecao em prompts reativos.
+ * Recebe array de eventos do Google Calendar API (shape: summary, start.dateTime
+ * pra timed OU start.date pra all-day).
+ *
+ * Retorna null se eventos for vazio/invalido — caller decide se anexa ou nao
+ * (padrao Oura: ausencia de dado = nao inventa).
+ */
+function montarBlocoAgenda(eventos, now = new Date()) {
+  if (!Array.isArray(eventos) || eventos.length === 0) return null;
+  const linhas = [], timed = [];
+  for (const ev of eventos) {
+    const summary = ev.summary || '(sem título)';
+    const dt = ev.start && ev.start.dateTime;   // all-day usa ev.start.date
+    if (dt) { timed.push({ summary, startISO: dt }); linhas.push(`- ${_fmtHora(dt)} — ${summary}`); }
+    else { linhas.push(`- dia todo — ${summary}`); }
+  }
+  timed.sort((a, b) => new Date(a.startISO) - new Date(b.startISO));
+  const prox = timed.find(e => minutosAteEvento(e.startISO, now) >= 0);
+  let bloco = `━━━ AGENDA REAL DE HOJE (fonte factual — não invente nada além disto) ━━━\n${linhas.join('\n')}`;
+  bloco += prox
+    ? `\nPRÓXIMO COMPROMISSO: ${prox.summary} às ${_fmtHora(prox.startISO)} (${_fmtFalta(minutosAteEvento(prox.startISO, now))})`
+    : `\nPRÓXIMO COMPROMISSO: nenhum mais hoje.`;
+  bloco += `\nAntes de sugerir qualquer atividade com duração, olhe o PRÓXIMO COMPROMISSO e quanto falta. Ajuste a sugestão ao tempo real que cabe. Use os horários acima, não suponha.`;
+  return bloco;
+}
+
+module.exports = { getBrtNow, TIMEZONE, minutosAteEvento, montarBlocoAgenda };
