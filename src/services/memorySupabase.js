@@ -413,7 +413,7 @@ PRINCÍPIO FINAL: chave estável + valor que evolui = memória que não fragment
 async function extrairEsalvarFatos(mensagem, resposta) {
   try {
     const result = await anthropic.messages.create({
-      model: 'claude-opus-4-7',
+      model: 'claude-opus-4-8',
       max_tokens: 600,
       system: SYSTEM_EXTRATOR,
       messages: [{

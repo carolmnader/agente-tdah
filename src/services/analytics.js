@@ -125,7 +125,7 @@ const gerarRelatorioIA = async (padroes, tipo = 'semanal') => {
   if (!padroes) return '📊 Ainda estou coletando dados! Preciso de pelo menos 1 semana de conversas para identificar padrões.';
 
   const resp = await anthropic.messages.create({
-    model: 'claude-opus-4-7',
+    model: 'claude-opus-4-8',
     max_tokens: 800,
     system: SYSTEM_PROMPT,
     messages: [{

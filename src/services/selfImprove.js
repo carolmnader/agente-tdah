@@ -66,7 +66,7 @@ Responda em JSON válido sem markdown:
 }`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-7',
+    model: 'claude-opus-4-8',
     max_tokens: 2000,
     messages: [{ role: 'user', content: prompt }],
   });

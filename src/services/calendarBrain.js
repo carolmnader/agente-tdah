@@ -742,7 +742,7 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       console.log(`📅 [CalendarBrain] Pré-classificador: consultar_evento "${intent.evento_original}" (Opus bypassed)`);
     } else {
       const respIA = await anthropic.messages.create({
-        model: 'claude-opus-4-7',
+        model: 'claude-opus-4-8',
         max_tokens: 600,
         messages: [{ role: 'user', content: prompt }]
       });

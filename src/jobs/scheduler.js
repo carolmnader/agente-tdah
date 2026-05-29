@@ -65,7 +65,7 @@ Regras desta mensagem:
 Gere APENAS a mensagem, sem explicações.`;
 
   const resp = await anthropic.messages.create({
-    model: 'claude-opus-4-7',
+    model: 'claude-opus-4-8',
     max_tokens: 1500,
     system: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],

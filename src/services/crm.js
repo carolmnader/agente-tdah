@@ -77,7 +77,7 @@ const buscarAniversariosProximos = async (dias = 7) => {
 const extrairPessoasDaMensagem = async (mensagem) => {
   try {
     const resp = await anthropic.messages.create({
-      model: 'claude-opus-4-7',
+      model: 'claude-opus-4-8',
       max_tokens: 400,
       messages: [{
         role: 'user',
