@@ -108,4 +108,26 @@ function eventoElegivelPos(ev, agora) {
   return fim >= limiteInferior && fim < limiteSuperior;
 }
 
-module.exports = { getBrtNow, TIMEZONE, minutosAteEvento, montarBlocoAgenda, eventoElegivelPos };
+/**
+ * Sabor do check-in pós-evento por nome de calendário (PURA).
+ *  'vivido' → Eventos/Trabalho/Lazer (curiosidade "como foi?", de fato rolou)
+ *  'habito' → Selfcare (convite-aberto, NÃO assume execução)
+ *  null     → Saúde (blindado) + Estudo/Faculdade/Lar-Pets/Burocracia (silêncio)
+ */
+function classificarSaborPos(nomeCalendario) {
+  if (['Eventos', 'Trabalho', 'Lazer'].includes(nomeCalendario)) return 'vivido';
+  if (nomeCalendario === 'Selfcare') return 'habito';
+  return null;
+}
+
+/**
+ * Governança de volume do pós-evento (PURA). Teto total 2/dia; sub-teto: no
+ * máximo 1 hábito/dia (Selfcare é convite, não pode encher).
+ */
+function cabeNoTetoPos({ totalHoje, habitoHoje, sabor }) {
+  if (totalHoje >= 2) return false;
+  if (sabor === 'habito' && habitoHoje >= 1) return false;
+  return true;
+}
+
+module.exports = { getBrtNow, TIMEZONE, minutosAteEvento, montarBlocoAgenda, eventoElegivelPos, classificarSaborPos, cabeNoTetoPos };

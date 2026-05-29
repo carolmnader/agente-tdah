@@ -2,7 +2,7 @@
 // Valida eventoElegivelPos(ev, agora) em src/utils/time.js. Sem rede/modelo.
 // Janela elegível: terminou em [agora−15min, agora−5min), TIMED, não-buffer.
 
-const { eventoElegivelPos } = require('./src/utils/time');
+const { eventoElegivelPos, classificarSaborPos, cabeNoTetoPos } = require('./src/utils/time');
 
 let passed = 0, failed = 0;
 function check(label, ok, info = '') {
@@ -46,6 +46,30 @@ check('C6b) fim exatamente há 15min → true (limite inferior inclusivo)',
 
 // C7: defensivo — objeto sem end → false
 check('C7) sem end → false', eventoElegivelPos({ summary: 'x', start: { dateTime: agora.toISOString() } }, agora) === false);
+
+// ─── Commit B: classificarSaborPos ───────────────────────────────────────────
+check('S1) Selfcare → habito', classificarSaborPos('Selfcare') === 'habito');
+check('S2) Eventos → vivido', classificarSaborPos('Eventos') === 'vivido');
+check('S3) Trabalho → vivido', classificarSaborPos('Trabalho') === 'vivido');
+check('S4) Lazer → vivido', classificarSaborPos('Lazer') === 'vivido');
+check('S5) Saúde → null (blindado)', classificarSaborPos('Saúde') === null);
+check('S6) Estudo → null', classificarSaborPos('Estudo') === null);
+check('S7) Faculdade → null', classificarSaborPos('Faculdade') === null);
+check('S8) Lar/Pets → null', classificarSaborPos('Lar/Pets') === null);
+check('S9) Burocracia → null', classificarSaborPos('Burocracia') === null);
+check('S10) Outro/undefined → null', classificarSaborPos('Outro') === null && classificarSaborPos(undefined) === null);
+
+// ─── Commit B: cabeNoTetoPos ──────────────────────────────────────────────────
+check('T1) total 2 → false (teto total)',
+  cabeNoTetoPos({ totalHoje: 2, habitoHoje: 0, sabor: 'vivido' }) === false);
+check('T2) habito com habitoHoje 1 → false (sub-teto hábito)',
+  cabeNoTetoPos({ totalHoje: 1, habitoHoje: 1, sabor: 'habito' }) === false);
+check('T3) vivido com habitoHoje 1 e total 1 → true',
+  cabeNoTetoPos({ totalHoje: 1, habitoHoje: 1, sabor: 'vivido' }) === true);
+check('T4) tudo zero (habito) → true',
+  cabeNoTetoPos({ totalHoje: 0, habitoHoje: 0, sabor: 'habito' }) === true);
+check('T5) tudo zero (vivido) → true',
+  cabeNoTetoPos({ totalHoje: 0, habitoHoje: 0, sabor: 'vivido' }) === true);
 
 console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━`);
 console.log(`✅ ${passed} passou  |  ❌ ${failed} falhou  (de ${passed + failed})`);
