@@ -45,6 +45,7 @@ router.get('/checkin-tarde', wrapJob('checkin-tarde', (req) => {
   return jobs.jobCheckinTarde(hora);
 }));
 router.get('/pre-evento', wrapJob('pre-evento', () => jobs.jobPreEvento()));
+router.get('/pos-evento', wrapJob('pos-evento', () => jobs.jobPosEvento()));
 router.get('/resumo', wrapJob('resumo', () => jobs.jobResumoNoturno()));
 router.get('/semanal', wrapJob('semanal', () => jobs.jobPlanejamentoSemanal()));
 router.get('/aniversarios', wrapJob('aniversarios', () => jobs.jobAniversarios()));

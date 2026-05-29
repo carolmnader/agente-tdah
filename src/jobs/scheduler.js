@@ -1,7 +1,7 @@
 // BACKLOG Bug #16: 7 crons existentes usam 'America/Bahia', novo cron noturno
 // usa 'America/Sao_Paulo' (pós-Bug #5). Alinhar todos pra Sao_Paulo em sessão futura.
 const cron = require('node-cron');
-const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient, buscarEventosTodos } = require('../integrations/calendar');
+const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient, buscarEventosTodos, getCalendarioInfo } = require('../integrations/calendar');
 const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria, buscarHumorRecente } = require('../services/memorySupabase');
 const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
@@ -10,9 +10,9 @@ const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/ana
 const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt, buscarAprendizadosNaoNotificados, marcarComoNotificadas } = require('../services/hipoteses');
 const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
 const { proporSugestao } = require('../services/sugestoes');
-const { jaNotificado, marcarNotificado, limparAntigos } = require('../services/eventosNotificados');
+const { jaNotificado, marcarNotificado, limparAntigos, contarNotificadosHoje } = require('../services/eventosNotificados');
 const { snapshotMatinal } = require('../services/oura');
-const { getBrtNow } = require('../utils/time');
+const { getBrtNow, eventoElegivelPos } = require('../utils/time');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
 const { detectarPerformaSubjetividade } = require('../services/detectarPerformaSubjetividade');
@@ -55,6 +55,7 @@ FONTES (CRÍTICO — não inventar):
   ✗ "Você é capaz! Niemeyer dizia pra acreditar nas curvas!" (clichê motivacional)
 - Tipo "checkin_tarde": é check-in de meio do dia, hora específica no contexto. Tom Registro A (seca-poética) ou C (editorial-observadora), NUNCA maternal. Se há eventos_passados, pergunte factualmente sobre eles ("você tinha X, como foi?"). Se tarefas_pendentes tem itens, mencione uma específica sem cobrar. Se evento_proximo_30min não for null, seja breve (vai interromper). Se tudo vazio, só marque o momento ("tarde começando") sem forçar conversa.
 - Tipo "pre_evento": é lembrete de evento que começa em alguns minutos. Em "CONTEXTO" você recebe: evento (nome), hora (HH:MM BRT), em_minutos (número EXATO de minutos até começar), local. SEMPRE use em_minutos LITERALMENTE — ex: se em_minutos=28, escreva "em 28 minutos" ou "daqui a 28 minutos". NÃO arredonde pra 30. NÃO substitua por "logo", "em breve", "já já", "daqui a pouco". Se em_minutos for 0 ou 1, diga "Agora" ou "em 1 minuto". Use a hora literal (HH:MM). Tom Registro A (seca-poética) ou C (editorial-observadora). Mensagem CURTA — 1-3 linhas. Pode adicionar 1 detalhe contextual (item a trazer, deslocamento). Se local for "não especificado", omita.
+- Tipo "pos_evento": check-in caloroso sobre um evento que ACABOU. CONTEXTO traz: evento (nome), hora_fim (HH:MM BRT), ha_minutos, local. REGRA TONAL CRÍTICA: é CURIOSIDADE/CELEBRAÇÃO, NUNCA cobrança. NUNCA pergunte "você fez?" nem pressuponha que foi bom OU ruim. Abra espaço, leve — ex. "Como foi [evento]? 💜". CURTÍSSIMA, 1-2 linhas. Registro B (presença) ou C (editorial-observadora), NUNCA seco/clínico. Use o nome do evento LITERAL do CONTEXTO; NÃO invente detalhes. NÃO precisa citar ha_minutos. Se local for "não especificado", omita. Silêncio da pessoa nunca é cobrado.
 - Se agenda_do_dia estiver vazia ou ausente, diga literalmente "agenda livre hoje" ou similar. NÃO mencione exercício, estudo, reunião ou outros compromissos a menos que estejam em agenda_do_dia.
 
 Regras desta mensagem:
@@ -279,6 +280,71 @@ const jobPreEvento = async () => {
   }
 };
 
+// ─── JOB 2.5: CHECK-IN PÓS-EVENTO (sabor "vivido") ───────────────────────────
+// Espelha jobPreEvento mas detecta evento que ACABOU (janela [−15,−5)min via
+// eventoElegivelPos puro). Tom celebração/curiosidade, NUNCA cobrança.
+// Allowlist Eventos/Trabalho/Lazer · blinda Saúde · teto 2/dia · quiet hours 22-7.
+const jobPosEvento = async () => {
+  try {
+    const agora = new Date();
+
+    // Quiet hours: 22h–07h BRT → silêncio.
+    const { horaNum } = getBrtNow(agora);
+    if (horaNum < 7 || horaNum >= 22) return;
+
+    // Teto diário (cross-execução, via eventos_notificados).
+    const enviadosHoje = await contarNotificadosHoje('pos_evento_vivido');
+    if (enviadosHoje >= 2) return;
+
+    const ALLOWLIST = ['Eventos', 'Trabalho', 'Lazer'];
+    const BLOCK = ['Saúde'];
+
+    // buscarEventosTodos: cobre os 9 calendários E seta _calendarId (≠ loop env do pré).
+    const trintaMin = new Date(agora.getTime() - 30 * 60000);
+    const eventos = await buscarEventosTodos(trintaMin, agora);
+
+    let enviadosNesta = 0;
+    for (const ev of eventos) {
+      try {
+        const nome = getCalendarioInfo(ev._calendarId)?.nome;
+        if (BLOCK.includes(nome)) continue;          // blinda Saúde (defense-in-depth)
+        if (!ALLOWLIST.includes(nome)) continue;     // silencia Estudo/Faculdade/Lar/Burocracia/Selfcare
+        if (!eventoElegivelPos(ev, agora)) continue; // timed + não-buffer + janela [−15,−5)min
+        if (await jaNotificado(ev.id, 'pos_evento_vivido')) continue;
+        if (enviadosHoje + enviadosNesta >= 2) break; // teto respeitado dentro da execução
+
+        const fimDate = new Date(ev.end.dateTime);
+        const horaFim = fimDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+        const haMinutos = Math.max(0, Math.round((agora.getTime() - fimDate.getTime()) / 60000));
+
+        const msg = await gerarMensagemProativa({
+          tipo: 'pos_evento',
+          dados: {
+            evento: ev.summary,
+            hora_fim: horaFim,
+            ha_minutos: haMinutos,
+            local: ev.location || 'não especificado',
+          },
+        });
+        await sendTelegramMessage(CAROL_CHAT_ID, msg);
+        // INSERT só DEPOIS do envio (igual jobPreEvento)
+        await marcarNotificado(ev.id, 'pos_evento_vivido');
+        enviadosNesta++;
+        console.log(`[Scheduler] ✅ Check-in pós-evento: ${ev.summary} (há ${haMinutos}min)`);
+      } catch (eventoErr) {
+        console.error('[Scheduler] ❌ pos-evento item:', {
+          name: eventoErr.name, message: eventoErr.message,
+          type: eventoErr?.type, status: eventoErr?.status,
+          eventId: ev?.id, stack: eventoErr.stack
+        });
+        // Não re-throw: outros eventos continuam
+      }
+    }
+  } catch(e) {
+    console.error('[Scheduler] ❌ Erro pós-evento:', e.message);
+  }
+};
+
 // ─── JOB 3: RESUMO NOTURNO — todo dia às 22h ─────────────────────────────────
 
 const jobResumoNoturno = async () => {
@@ -486,6 +552,9 @@ const iniciarScheduler = () => {
 
   // Pré-evento — checa a cada 5 minutos
   cron.schedule('*/5 * * * *', jobPreEvento, { timezone: 'America/Bahia' });
+  // Pós-evento: paridade com o pré (não roda em Vercel serverless; disparo real
+  // via cron-job.org → GET /api/cron/pos-evento a cada 5min).
+  cron.schedule('*/5 * * * *', jobPosEvento, { timezone: 'America/Sao_Paulo' });
 
   // Resumo noturno — todo dia às 22h
   cron.schedule('0 22 * * *', jobResumoNoturno, { timezone: 'America/Bahia' });
@@ -526,6 +595,7 @@ module.exports = {
   jobBriefingMatinal,
   jobCheckinTarde,
   jobPreEvento,
+  jobPosEvento,
   jobResumoNoturno,
   jobPlanejamentoSemanal,
   jobAniversarios,

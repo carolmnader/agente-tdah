@@ -82,4 +82,30 @@ function montarBlocoAgenda(eventos, now = new Date()) {
   return bloco;
 }
 
-module.exports = { getBrtNow, TIMEZONE, minutosAteEvento, montarBlocoAgenda };
+// Buffers/deslocamento não são eventos "vividos" (mesmo filtro de título do
+// motor pré-evento, scheduler.js).
+function _ehBufferOuDeslocamento(summary) {
+  const s = summary || '';
+  return s.includes('Buffer') || s.includes('🌿') || s.includes('🚗');
+}
+
+/**
+ * Elegibilidade PURA pro check-in pós-evento. Recebe evento do buscarEventosTodos
+ * (ev.start/ev.end/ev.summary) e `agora` (Date). true se:
+ *  - é TIMED (tem start.dateTime E end.dateTime) — all-day → false;
+ *  - não é buffer/deslocamento;
+ *  - terminou na janela [agora−15min, agora−5min).
+ * A allowlist por nome de calendário fica no job (impura) — aqui só tempo+forma.
+ */
+function eventoElegivelPos(ev, agora) {
+  if (!ev || !ev.start || !ev.end) return false;
+  if (!ev.start.dateTime || !ev.end.dateTime) return false; // all-day fora
+  if (_ehBufferOuDeslocamento(ev.summary)) return false;
+  const fim = new Date(ev.end.dateTime).getTime();
+  if (isNaN(fim)) return false;
+  const limiteInferior = agora.getTime() - 15 * 60000; // −15min
+  const limiteSuperior = agora.getTime() - 5 * 60000;  // −5min
+  return fim >= limiteInferior && fim < limiteSuperior;
+}
+
+module.exports = { getBrtNow, TIMEZONE, minutosAteEvento, montarBlocoAgenda, eventoElegivelPos };

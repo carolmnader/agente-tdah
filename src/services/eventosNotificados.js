@@ -83,4 +83,31 @@ async function limparAntigos() {
   return count || 0;
 }
 
-module.exports = { tentarMarcarNotificado, jaNotificado, marcarNotificado, limparAntigos };
+/**
+ * Conta notificações de um tipo enviadas HOJE (início do dia em BRT = UTC-3,
+ * sem horário de verão no Brasil desde 2019). Coluna real = notificado_em
+ * (não há created_at nesta tabela). Em ERRO → 0 (leitura falha não cala a ARIA).
+ */
+async function contarNotificadosHoje(tipo) {
+  try {
+    const agoraBRT = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const inicioDiaBRT = new Date(Date.UTC(
+      agoraBRT.getUTCFullYear(), agoraBRT.getUTCMonth(), agoraBRT.getUTCDate(), 3, 0, 0
+    )); // 00:00 BRT = 03:00 UTC daquele dia
+    const { count, error } = await supabase
+      .from('eventos_notificados')
+      .select('evento_id', { count: 'exact', head: true })
+      .eq('tipo_notificacao', tipo)
+      .gte('notificado_em', inicioDiaBRT.toISOString());
+    if (error) {
+      console.error('[eventosNotificados] contarNotificadosHoje erro:', { code: error.code, message: error.message });
+      return 0;
+    }
+    return count || 0;
+  } catch (e) {
+    console.error('[eventosNotificados] contarNotificadosHoje exceção:', e.message);
+    return 0;
+  }
+}
+
+module.exports = { tentarMarcarNotificado, jaNotificado, marcarNotificado, limparAntigos, contarNotificadosHoje };
