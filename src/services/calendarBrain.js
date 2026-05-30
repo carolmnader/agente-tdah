@@ -194,8 +194,7 @@ function dicaIntent(msg) {
   return null; // ambíguo (ambos ou nenhum) — deixa Opus decidir
 }
 
-const resolverDataHora = (data, hora) => {
-  const agora = new Date();
+const resolverDataHora = (data, hora, agora = new Date()) => {
   const resultado = new Date(agora);
   const dias = { segunda:1, terca:2, quarta:3, quinta:4, sexta:5, sabado:6, domingo:0 };
   if (!data || data === 'hoje') {

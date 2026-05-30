@@ -17,7 +17,8 @@ const PROJECT_ROOT = path.resolve(__dirname);
 const CHILD_SCRIPT = `
 require('dotenv').config();
 const { resolverDataHora } = require('./src/services/calendarBrain');
-console.log(resolverDataHora('amanha', '13:00').toISOString());
+// base FIXA de meio-dia (15:00Z = 12:00 BRT) — longe da virada de data, determinístico nas 2 TZs
+console.log(resolverDataHora('amanha', '13:00', new Date('2026-05-29T15:00:00Z')).toISOString());
 `;
 
 // Cenário 3: simula a abordagem C.1 (process.env.TZ setado em runtime no entrypoint,
@@ -26,7 +27,8 @@ const CHILD_SCRIPT_RUNTIME_TZ = `
 process.env.TZ = 'America/Sao_Paulo';
 require('dotenv').config();
 const { resolverDataHora } = require('./src/services/calendarBrain');
-console.log(resolverDataHora('amanha', '13:00').toISOString());
+// base FIXA de meio-dia (15:00Z = 12:00 BRT) — longe da virada de data, determinístico nas 2 TZs
+console.log(resolverDataHora('amanha', '13:00', new Date('2026-05-29T15:00:00Z')).toISOString());
 `;
 
 function runWithTz(tz, scriptOverride = null) {
