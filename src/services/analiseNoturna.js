@@ -7,7 +7,7 @@ const { chamarAnaliseNoturna } = require('../prompts/analiseNoturna');
 const { hipotesesParaPrompt } = require('./hipoteses');
 const { listarEventosHoje } = require('../integrations/calendar');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 async function buscarMensagens24h() {
   const desde = new Date(Date.now() - 24 * 3600 * 1000).toISOString();

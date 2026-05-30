@@ -6,7 +6,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { proporHipotese, hipotesesParaPrompt } = require('../services/hipoteses');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 async function detectarEPropor(message, ariaResponse, history = []) {
   try {

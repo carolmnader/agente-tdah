@@ -3,7 +3,7 @@
 
 const { createClient } = require('@supabase/supabase-js');
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 const CATEGORIAS_VALIDAS = ['feature', 'bug', 'refactor', 'voice_calibration'];
 // Bug G família removeu CHECK constraint do banco (19/05/2026) — lista
