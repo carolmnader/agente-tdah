@@ -358,6 +358,14 @@ const jobPosEvento = async () => {
         await sendTelegramMessage(CAROL_CHAT_ID, msg);
         // INSERT só DEPOIS do envio (igual jobPreEvento)
         await marcarNotificado(ev.id, tipo);
+        // Loop Fogg (Commit 1): liga a resposta da Carol a ESTE evento, pra o
+        // caminho reativo reconhecer e celebrar/acolher (think Passo 0f-pos,
+        // TTL 3h, single-shot). Sem persistência de 'realizado' (Commit 2).
+        const { salvarAcaoPendente } = require('../services/memorySupabase');
+        await salvarAcaoPendente(CAROL_CHAT_ID, {
+          tipo: 'pos_evento',
+          params: { evento_id: ev.id, evento: ev.summary, sabor },
+        });
         totalHoje++;
         if (sabor === 'habito') habitoHoje++;
         console.log(`[Scheduler] ✅ Check-in pós-evento (${sabor}): ${ev.summary} (há ${haMinutos}min)`);

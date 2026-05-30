@@ -6,7 +6,8 @@ const { isEmergencia, getModoEmergencia, gerarCheckin, getCheckinMatinal, interp
 const { getFaseLunar, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holistic-context');
-const { processarCalendar } = require('./calendarBrain');
+const { processarCalendar, sinalCalendarGuard } = require('./calendarBrain');
+const { montarDiretrizCelebracao } = require('./celebracaoPosEvento');
 const { getBrtNow, montarBlocoAgenda } = require('../utils/time');
 const { buscarEventosTodos } = require('../integrations/calendar');
 
@@ -170,7 +171,7 @@ function chooseStrategy(analysis) {
 // ─────────────────────────────────────────────
 // PASSO 3 — Gera a resposta final
 // ─────────────────────────────────────────────
-async function generateResponse(message, analysis, strategy, memorySummary, pessoasInfo = {}) {
+async function generateResponse(message, analysis, strategy, memorySummary, pessoasInfo = {}, extraDiretriz = '') {
   const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
 
   const evolvedAdditions = loadEvolvedPrompt();
@@ -274,7 +275,8 @@ ${strategy.instruction}
 
 Estado emocional detectado: ${analysis.emotion}
 Urgência: ${analysis.urgency}
-Nota interna: ${analysis.thinking_note}`;
+Nota interna: ${analysis.thinking_note}
+${extraDiretriz ? `\n${extraDiretriz}\n` : ''}`;
 
   const history = await getHistory();
 
@@ -420,6 +422,36 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
       await addMessage('user', message);
       await addMessage('assistant', resp);
       return resp;
+    }
+
+    // Passo 0f-pos: resposta a check-in PÓS-EVENTO (loop Fogg — Commit 1).
+    // Liga a resposta da Carol ao evento que disparou o "como foi X?" e
+    // celebra/acolhe ancorado nele. ANTES do processarCalendar pra "Não fui" não
+    // virar cancelamento. Single-shot + TTL 3h. Lido ANTES do bloco weekly
+    // (cuja leitura default de 5min deletaria um pendente pos_evento mais velho).
+    if (chatId) {
+      const { buscarAcaoPendente, limparAcaoPendente } = require('./memorySupabase');
+      const POS_EVENTO_TTL_MS = 3 * 60 * 60 * 1000; // 3h — resposta pode ser lenta
+      const pendPos = await buscarAcaoPendente(chatId, POS_EVENTO_TTL_MS);
+      if (pendPos?.tipo === 'pos_evento') {
+        if (sinalCalendarGuard(message)) {
+          // Comando de calendário legítimo ("cancela yoga", "marca X") NÃO é
+          // sequestrado: solta o pendente (single-shot) e deixa fluir p/ calendarBrain.
+          await limparAcaoPendente(chatId);
+        } else if (!isEmergencia(message)) {
+          // Emergência tem prioridade (cai no Passo 0b3). Senão: celebra/acolhe.
+          const diretriz = montarDiretrizCelebracao({ sabor: pendPos.params?.sabor, evento: pendPos.params?.evento });
+          const analysisPos = await analyzeMessage(message);
+          const strategyPos = chooseStrategy(analysisPos);
+          const memoryPos = await getMemorySummary();
+          const ariaResp = await generateResponse(message, analysisPos, strategyPos, memoryPos, {}, diretriz);
+          await addMessage('user', message);
+          await addMessage('assistant', ariaResp);
+          await limparAcaoPendente(chatId);
+          console.log(`🎉 [Brain] Celebração pós-evento: "${pendPos.params?.evento}" (${pendPos.params?.sabor})`);
+          return ariaResp;
+        }
+      }
     }
 
     // Passo 0f-weekly: respostas a Weekly Review (Onda 1.5)

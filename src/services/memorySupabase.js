@@ -551,7 +551,7 @@ async function salvarAcaoPendente(chatId, { tipo, params }) {
   if (error) console.error('Erro ao salvar ação pendente:', error.message);
 }
 
-async function buscarAcaoPendente(chatId) {
+async function buscarAcaoPendente(chatId, ttlMs = ACAO_PENDENTE_TIMEOUT_MS) {
   const { data, error } = await supabase
     .from('acoes_pendentes')
     .select('tipo, params, criada_em')
@@ -560,7 +560,7 @@ async function buscarAcaoPendente(chatId) {
   if (error) { console.error('Erro ao buscar ação pendente:', error.message); return null; }
   if (!data) return null;
   const idade = Date.now() - new Date(data.criada_em).getTime();
-  if (idade > ACAO_PENDENTE_TIMEOUT_MS) {
+  if (idade > ttlMs) {
     await limparAcaoPendente(chatId);
     return null;
   }
