@@ -56,6 +56,31 @@ function _fmtFalta(min) {
 }
 
 /**
+ * Marcador relativo entre um evento e o "agora" (ambos Date OU string ISO).
+ * PURO: recebe o agora como argumento — sem relógio interno (nunca new Date() vazio).
+ * Futuro → "em 25 min" / "em 1h10" / "em 2d3h". Presente (delta 0) → "agora".
+ * Passado (delta < 0) → "há 30 min · já passou".
+ * Data inválida → '' (aditivo-seguro: caller só anexa se houver string).
+ */
+function formatarTempoRelativo(eventoISO, agoraISO) {
+  const ev = new Date(eventoISO).getTime();
+  const ag = new Date(agoraISO).getTime();
+  if (Number.isNaN(ev) || Number.isNaN(ag)) return '';
+  const delta = Math.round((ev - ag) / 60000); // minutos; negativo = já passou
+  if (delta === 0) return 'agora';
+  const fmt = (min) => {
+    if (min < 60) return `${min} min`;
+    if (min < 1440) {
+      const h = Math.floor(min / 60), m = min % 60;
+      return m === 0 ? `${h}h` : `${h}h${String(m).padStart(2, '0')}`;
+    }
+    const d = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60);
+    return h === 0 ? `${d}d` : `${d}d${h}h`;
+  };
+  return delta > 0 ? `em ${fmt(delta)}` : `há ${fmt(-delta)} · já passou`;
+}
+
+/**
  * Monta bloco textual "AGENDA REAL DE HOJE" pra injecao em prompts reativos.
  * Recebe array de eventos do Google Calendar API (shape: summary, start.dateTime
  * pra timed OU start.date pra all-day).
@@ -69,7 +94,7 @@ function montarBlocoAgenda(eventos, now = new Date()) {
   for (const ev of eventos) {
     const summary = ev.summary || '(sem título)';
     const dt = ev.start && ev.start.dateTime;   // all-day usa ev.start.date
-    if (dt) { timed.push({ summary, startISO: dt }); linhas.push(`- ${_fmtHora(dt)} — ${summary}`); }
+    if (dt) { timed.push({ summary, startISO: dt }); linhas.push(`- ${_fmtHora(dt)} — ${summary} (${formatarTempoRelativo(dt, now)})`); }
     else { linhas.push(`- dia todo — ${summary}`); }
   }
   timed.sort((a, b) => new Date(a.startISO) - new Date(b.startISO));
@@ -130,4 +155,4 @@ function cabeNoTetoPos({ totalHoje, habitoHoje, sabor }) {
   return true;
 }
 
-module.exports = { getBrtNow, TIMEZONE, minutosAteEvento, montarBlocoAgenda, eventoElegivelPos, classificarSaborPos, cabeNoTetoPos };
+module.exports = { getBrtNow, TIMEZONE, minutosAteEvento, formatarTempoRelativo, montarBlocoAgenda, eventoElegivelPos, classificarSaborPos, cabeNoTetoPos };

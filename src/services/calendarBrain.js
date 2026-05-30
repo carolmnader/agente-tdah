@@ -1,6 +1,7 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const { listarEventosHoje, listarEventosSemana, criarEvento, reagendarEvento, cancelarEvento, proximoHorarioLivre, buscarEvento, detectarCategoria } = require('../integrations/calendar');
 const { buscarMemoriaPorChave, salvarAcaoPendente, buscarAcaoPendente, limparAcaoPendente } = require('./memorySupabase');
+const { formatarTempoRelativo } = require('../utils/time');
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -802,7 +803,8 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
           const d = new Date(ev.start.dateTime || ev.start.date);
           const dia = d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
           const hora = ev.start.dateTime ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
-          txt += `${info.emoji} ${ev.summary} — ${dia} às ${hora}\n`;
+          const rel = ev.start.dateTime ? ` (${formatarTempoRelativo(ev.start.dateTime, agora)})` : '';
+          txt += `${info.emoji} ${ev.summary} — ${dia} às ${hora}${rel}\n`;
         });
         return txt;
       }
@@ -812,7 +814,8 @@ const processarCalendar = async (mensagem, historico = [], chatId = parseInt(pro
       const d = new Date(ev.start.dateTime || ev.start.date);
       const dia = d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
       const hora = ev.start.dateTime ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : 'dia todo';
-      return `${info.emoji} <b>${ev.summary}</b>\n📅 ${dia} às ${hora}\n📂 Agenda: ${info.nome}`;
+      const rel = ev.start.dateTime ? ` (${formatarTempoRelativo(ev.start.dateTime, agora)})` : '';
+      return `${info.emoji} <b>${ev.summary}</b>\n📅 ${dia} às ${hora}${rel}\n📂 Agenda: ${info.nome}`;
     }
 
     // CRIAR
