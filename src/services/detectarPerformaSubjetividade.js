@@ -46,7 +46,8 @@ RESPOSTA DA ARIA: """{respostaAria}"""`;
 /**
  * Analisa resposta da ARIA por performance de subjetividade.
  * Fire-and-forget: caller usa .catch(() => {}).
- * Severidade >= 3 persiste em subjetividade_log.
+ * Persiste TODA avaliação em subjetividade_log (janela de calibração, Commit 16):
+ * severidade real 0..5, sem gate. Threshold de ação será re-gated com dado.
  */
 async function detectarPerformaSubjetividade(respostaAria, mensagemCarol, caminho, contextoExtra = {}) {
   if (typeof respostaAria !== 'string' || respostaAria.length < 20) return;
@@ -65,20 +66,20 @@ async function detectarPerformaSubjetividade(respostaAria, mensagemCarol, caminh
     const raw = response.content[0]?.text?.trim().replace(/```json|```/g, '').trim() || '{}';
     const parsed = JSON.parse(raw);
 
-    if (typeof parsed.severidade !== 'number' || parsed.severidade < 3) {
-      // Severidade 0-2: nao persiste. Debug opcional.
-      return;
-    }
-
-    // Severidade 3-5: log + insert
-    console.log(`🛡️ [Subjetividade] severidade=${parsed.severidade} padrao=${parsed.padrao_detectado || '?'} caminho=${caminho}`);
+    // JANELA DE CALIBRAÇÃO (Commit 16, anti-deriva 2/3): SEM gate de severidade.
+    // Persiste TODA avaliação com a severidade real — antes o gate >=3 nunca
+    // disparou (0 linhas em 3 dias), cego. A distribuição vai a SQL; o threshold
+    // de ação será tunado com dado e re-gated depois.
+    // (severidade -1 = juiz devolveu valor não-numérico — observável de propósito.)
+    const severidade = typeof parsed.severidade === 'number' ? parsed.severidade : -1;
+    console.log(`🛡️ [Subjetividade] severidade=${severidade} padrao=${parsed.padrao_detectado || '?'} caminho=${caminho}`);
 
     const { error } = await supabase.from('subjetividade_log').insert({
       caminho,
       resposta_original: respostaAria,
       mensagem_carol: mensagemCarol,
       padrao_detectado: parsed.padrao_detectado,
-      severidade: parsed.severidade,
+      severidade,
       contexto: { justificativa: parsed.justificativa, ...contextoExtra }
     });
 
@@ -86,7 +87,8 @@ async function detectarPerformaSubjetividade(respostaAria, mensagemCarol, caminh
       console.error('🛡️ [Subjetividade] erro ao inserir log:', error.message);
     }
   } catch (e) {
-    console.error('🛡️ [Subjetividade] erro silencioso:', e.message);
+    // Catch NÃO-silencioso (Commit 16): erro engolido vira visível no runtime log.
+    console.error(`🛡️ [Subjetividade] erro (caminho=${caminho}):`, e?.message, e?.stack);
   }
 }
 
