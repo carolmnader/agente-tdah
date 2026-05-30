@@ -29,7 +29,7 @@ async function blocoAgendaReativo(now) {
 }
 const { buscarPessoaInteligente, formatarPessoa, salvarOuAtualizarPessoa, buildPessoasContextoMensagem } = require('./crm');
 const { registrarEvento, gerarInsightRapido, gerarRelatorioSemanal, gerarRelatorioMensal } = require('./analytics');
-const { hipotesesParaPrompt, listarHipotesesValidadas } = require('./hipoteses');
+const { listarHipotesesValidadas } = require('./hipoteses');
 const { listarSugestoesAbertas } = require('./sugestoes');
 const { detectarEPropor } = require('../prompts/detectorPadroes');
 const { validarImplicitamente } = require('./validadorImplicito');
@@ -244,17 +244,13 @@ Meta 2026: ${meta}`;
     ? `\n━━━ PESSOAS NOVAS DETECTADAS ━━━\nPessoas que Carol mencionou e ainda não conheço: ${pessoasInfo.novas.join(', ')}.\nTermine sua resposta com UMA linha curta perguntando quem é (ex: "💭 Quem é ${pessoasInfo.novas[0]}? Curiosa!").\nNão interrompa o fluxo principal — a pergunta vem DEPOIS da resposta normal.`
     : '';
 
-  // Memória Evolutiva Fase 2 — injeta hipóteses validadas (>=0.6 confianca) no prompt
-  const hipotesesAtivas = await hipotesesParaPrompt(8).catch(() => []);
-  const blocoHipoteses = hipotesesAtivas.length > 0
-    ? `\n━━━ O QUE VOCÊ APRENDEU SOBRE CAROL ━━━\n${hipotesesAtivas.map(h => `- ${h.texto} (confiança: ${parseFloat(h.confianca).toFixed(2)})`).join('\n')}\n\nUse essas hipóteses pra contextualizar, não repeti-las de volta. Não invente novas aqui.`
-    : '';
-
+  // Memória Evolutiva Fase 2 DESCONTINUADA (anti-deriva, Commit 15): hipóteses
+  // NÃO voltam mais ao prompt reativo (cortado o loop gera→realimenta→performa, recon P1).
   const now = new Date();
   const agora = getBrtNow(now);
   const blocoAgenda = await blocoAgendaReativo(now);
 
-  const systemWithMemory = `${SYSTEM_PROMPT}${blocoHipoteses}
+  const systemWithMemory = `${SYSTEM_PROMPT}
 ${profileContext}
 ${holisticContext}
 
@@ -613,8 +609,12 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
     // Passo 8: extrai fatos automaticamente (fire-and-forget)
     extrairEsalvarFatos(message, ariaResponse).catch(e => console.log('🧠 Extração async:', e.message));
 
-    // Passo 8.5: memória evolutiva — detector reativo + validador implícito (fire-and-forget)
-    detectarEPropor(message, ariaResponse, history).catch(e => console.log('🧠 Detector:', e.message));
+    // Passo 8.5: memória evolutiva — validador implícito (fire-and-forget)
+    // Gerador de hipoteses DECOMISSIONADO (estourou 2x; gerava teoria nao-validada).
+    // Dormente por padrao. Auto-aperfeicoamento sera reconstruido como item 5 (schema fechado + humano-no-loop).
+    if (process.env.ARIA_GERAR_HIPOTESES === 'on') {
+      detectarEPropor(message, ariaResponse, history).catch(e => console.log('🧠 Detector:', e.message));
+    }
     validarImplicitamente(message, ariaResponse).catch(e => console.log('🧠 Validador:', e.message));
 
     // Passo 9: analytics (fire-and-forget)
