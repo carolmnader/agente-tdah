@@ -12,6 +12,7 @@ const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturn
 const { proporSugestao } = require('../services/sugestoes');
 const { jaNotificado, marcarNotificado, limparAntigos, contarNotificadosHoje } = require('../services/eventosNotificados');
 const { snapshotMatinal } = require('../services/oura');
+const { montarDiretrizPriming } = require('../services/priming');
 const { getBrtNow, eventoElegivelPos, classificarSaborPos, cabeNoTetoPos } = require('../utils/time');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
@@ -65,7 +66,8 @@ FONTES (CRÍTICO — não inventar):
   ✗ "Boa segunda! Como diria Clarice, 'eu sou tudo aquilo que aconteceu comigo'!" (frase textual inventada, motivacional)
   ✗ "Você é capaz! Niemeyer dizia pra acreditar nas curvas!" (clichê motivacional)
 - Tipo "checkin_tarde": é check-in de meio do dia, hora específica no contexto. Tom Registro A (seca-poética) ou C (editorial-observadora), NUNCA maternal. Se há eventos_passados, pergunte factualmente sobre eles ("você tinha X, como foi?"). Se tarefas_pendentes tem itens, mencione uma específica sem cobrar. Se evento_proximo_30min não for null, seja breve (vai interromper). Se tudo vazio, só marque o momento ("tarde começando") sem forçar conversa.
-- Tipo "pre_evento": é lembrete de evento que começa em alguns minutos. Em "CONTEXTO" você recebe: evento (nome), hora (HH:MM BRT), em_minutos (número EXATO de minutos até começar), local. SEMPRE use em_minutos LITERALMENTE — ex: se em_minutos=28, escreva "em 28 minutos" ou "daqui a 28 minutos". NÃO arredonde pra 30. NÃO substitua por "logo", "em breve", "já já", "daqui a pouco". Se em_minutos for 0 ou 1, diga "Agora" ou "em 1 minuto". Use a hora literal (HH:MM). Tom Registro A (seca-poética) ou C (editorial-observadora). Mensagem CURTA — 1-3 linhas. Pode adicionar 1 detalhe contextual (item a trazer, deslocamento). Se local for "não especificado", omita.
+- Tipo "pre_evento": é lembrete de evento que começa em alguns minutos. Em "CONTEXTO" você recebe: evento (nome), hora (HH:MM BRT), em_minutos (número EXATO de minutos até começar), local. SEMPRE use em_minutos LITERALMENTE — ex: se em_minutos=28, escreva "em 28 minutos" ou "daqui a 28 minutos". NÃO arredonde pra 30. NÃO substitua por "logo", "em breve", "já já", "daqui a pouco". Se em_minutos for 0 ou 1, diga "Agora" ou "em 1 minuto". Use a hora literal (HH:MM). Tom Registro A (seca-poética) ou C (editorial-observadora). Mensagem CURTA — 1-3 linhas (com o priming abaixo, no máximo ~4). Pode adicionar 1 detalhe contextual (item a trazer, deslocamento). Se local for "não especificado", omita.
+${contexto.tipo === 'pre_evento' ? montarDiretrizPriming(contexto.dados?.oura_corpo) : ''}
 - Tipo "pos_evento": check-in sobre algo que ACABOU. CONTEXTO traz: evento, hora_fim (HH:MM BRT), ha_minutos, local, e sabor ('vivido' ou 'habito'). REGRA TONAL CRÍTICA (vale pros dois sabores): NUNCA cobrança, NUNCA "você fez?", NUNCA pressuponha que foi bom OU ruim. CURTÍSSIMA 1-2 linhas, Registro B (presença) ou C, nunca seco/clínico. Use o nome do evento LITERAL do CONTEXTO; NÃO invente detalhes; NÃO precisa citar ha_minutos; se local for "não especificado", omita. Silêncio da pessoa NUNCA é cobrado. Ramifique por sabor:
   • sabor "vivido" (evento que de fato aconteceu — Eventos/Trabalho/Lazer): curiosidade calorosa sobre como foi. Ex.: "Como foi [evento]? 💜".
   • sabor "habito" (Selfcare — você NÃO sabe se a atividade rolou): convite ABERTO que NÃO assume execução (nem sucesso nem falha). Celebra SE rolou, acolhe SE não. Ex.: "Tinha [evento] agora 💜 se rolou, comemora comigo; se não, sem culpa."
@@ -257,13 +259,19 @@ const jobPreEvento = async () => {
             const minutosReais = Math.max(0, Math.round((startMs - agora.getTime()) / 60000));
             const hora = new Date(evento.start.dateTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
 
+            // Priming (MVP): readiness REAL de hoje, buscado SÓ aqui (evento elegível
+            // não-notificado prestes a virar mensagem), não em todo tick. Falha → null.
+            const oura = await snapshotMatinal().catch(() => null);
+            const ouraSlim = oura ? { readiness: oura.readiness, stress: oura.stress } : null;
+
             const msg = await gerarMensagemProativa({
               tipo: 'pre_evento',
               dados: {
                 evento: evento.summary,
                 hora: hora,
                 em_minutos: minutosReais,
-                local: evento.location || 'não especificado'
+                local: evento.location || 'não especificado',
+                oura_corpo: ouraSlim
               }
             });
             await sendTelegramMessage(CAROL_CHAT_ID, msg);
