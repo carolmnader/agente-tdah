@@ -5,6 +5,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { chamarAnaliseNoturna } = require('../prompts/analiseNoturna');
 const { hipotesesParaPrompt } = require('./hipoteses');
+const { buscarMemorias } = require('./memorySupabase');
 const { listarEventosHoje } = require('../integrations/calendar');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -46,14 +47,23 @@ async function buscarHipotesesCadastradas() {
   return todas.map(h => `- ${h.texto} (conf: ${parseFloat(h.confianca).toFixed(2)})`).join('\n');
 }
 
+async function buscarFeedbacksAriaExistentes() {
+  const data = await buscarMemorias('feedback_aria', 20).catch(() => []);
+  if (!data?.length) return null;
+  return data
+    .map(m => `- [${m.chave}] ${m.valor} (${m.contexto || 'reincidencia:1'})`)
+    .join('\n');
+}
+
 async function analisarNoturno() {
-  const [mensagens, humor, eventos, hipotesesExistentes] = await Promise.all([
+  const [mensagens, humor, eventos, hipotesesExistentes, feedbacksAriaExistentes] = await Promise.all([
     buscarMensagens24h(),
     buscarHumor3dias(),
     buscarEventosHoje(),
     buscarHipotesesCadastradas(),
+    buscarFeedbacksAriaExistentes(),
   ]);
-  return await chamarAnaliseNoturna({ mensagens, humor, eventos, hipotesesExistentes });
+  return await chamarAnaliseNoturna({ mensagens, humor, eventos, hipotesesExistentes, feedbacksAriaExistentes });
 }
 
 module.exports = {
@@ -62,4 +72,5 @@ module.exports = {
   buscarHumor3dias,
   buscarEventosHoje,
   buscarHipotesesCadastradas,
+  buscarFeedbacksAriaExistentes,
 };

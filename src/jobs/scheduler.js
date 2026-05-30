@@ -2,7 +2,8 @@
 // usa 'America/Sao_Paulo' (pós-Bug #5). Alinhar todos pra Sao_Paulo em sessão futura.
 const cron = require('node-cron');
 const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient, buscarEventosTodos, getCalendarioInfo } = require('../integrations/calendar');
-const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria, buscarHumorRecente } = require('../services/memorySupabase');
+const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria, buscarHumorRecente, salvarMemoriaComHistorico } = require('../services/memorySupabase');
+const { planejarUpsertFeedback } = require('../services/feedbackReincidente');
 const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buscarAniversariosProximos } = require('../services/crm');
@@ -551,6 +552,36 @@ const jobAnaliseNoturna = async () => {
         }
       }
       console.log(`[Scheduler] 🔧 ${sugestoesGeradas.length} sugestão(ões) persistida(s)`);
+    }
+
+    // (C) Feedbacks reincidentes sobre o comportamento da ARIA → memorias.feedback_aria.
+    // Honra de graça: buildMemoryContext já injeta a categoria no prompt reativo.
+    const feedbacksAria = resultado?.feedbacks_aria || [];
+    for (const f of feedbacksAria) {
+      try {
+        let memoriaExistente = null;
+        if (f.match_chave) {
+          const existentes = await buscarMemorias('feedback_aria', 50);
+          memoriaExistente = existentes.find(m => m.chave === f.match_chave) || null;
+        }
+        const plano = planejarUpsertFeedback({
+          item: {
+            instrucao_canonica: f.instrucao_canonica,
+            chave_sugerida: f.chave_sugerida,
+            match_chave: f.match_chave || null,
+          },
+          memoriaExistente,
+        });
+        // salvarMemoriaComHistorico: INSERT + same-key auto-supersede (insert; ou
+        // supersede o antigo + insert com count+1 quando acao === 'increment').
+        await salvarMemoriaComHistorico('feedback_aria', plano.chave, plano.valor, plano.contexto);
+        console.log(`🪞 Feedback ARIA ${plano.acao}: [${plano.chave}] ${plano.contexto}`);
+      } catch (err) {
+        console.error('[Scheduler] Erro ao registrar feedback ARIA:', err.message);
+      }
+    }
+    if (feedbacksAria.length > 0) {
+      console.log(`[Scheduler] 🪞 ${feedbacksAria.length} feedback(s) ARIA processado(s)`);
     }
   } catch (e) {
     console.error('🌙 [Cron noturno] Erro:', e.message);
