@@ -262,7 +262,13 @@ const jobPreEvento = async () => {
 
             // Priming (MVP): readiness REAL de hoje, buscado SÓ aqui (evento elegível
             // não-notificado prestes a virar mensagem), não em todo tick. Falha → null.
-            const oura = await snapshotMatinal().catch(() => null);
+            const TIMEOUT_OURA_MS = 3000;
+            let _t;
+            const oura = await Promise.race([
+              snapshotMatinal(),
+              new Promise(r => { _t = setTimeout(() => r(null), TIMEOUT_OURA_MS); }),
+            ]).catch(() => null);
+            clearTimeout(_t);
             const ouraSlim = oura ? { readiness: oura.readiness, stress: oura.stress } : null;
 
             const msg = await gerarMensagemProativa({
