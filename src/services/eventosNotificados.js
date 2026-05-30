@@ -67,6 +67,34 @@ async function marcarNotificado(eventoId, tipo = 'pre_evento_30min') {
 }
 
 /**
+ * Loop Fogg Commit 2: persiste o realizado na linha de dedup já existente
+ * (UPDATE, não INSERT — a linha foi criada por marcarNotificado no envio).
+ * Chave: (evento_id, tipo_notificacao). Best-effort: erro/linha-ausente apenas
+ * loga e segue — NUNCA derruba o turno nem a fala (a celebração já foi enviada).
+ * @param {string} eventoId
+ * @param {string} tipo  pos_evento_vivido | pos_evento_habito
+ * @param {{realizado: boolean|null, contextoResposta: string}} dados
+ * @returns {Promise<boolean>} true se o UPDATE rodou sem erro
+ */
+async function registrarRealizacao(eventoId, tipo, { realizado, contextoResposta } = {}) {
+  if (!eventoId) return false;
+  const { error } = await supabase
+    .from('eventos_notificados')
+    .update({
+      realizado: realizado === undefined ? null : realizado,
+      resposta_em: new Date().toISOString(),
+      contexto_resposta: contextoResposta ? String(contextoResposta).substring(0, 500) : null,
+    })
+    .eq('evento_id', eventoId)
+    .eq('tipo_notificacao', tipo);
+  if (error) {
+    console.error('[eventosNotificados] registrarRealizacao erro (best-effort):', { code: error.code, message: error.message });
+    return false;
+  }
+  return true;
+}
+
+/**
  * Limpeza diária: remove registros > 48h.
  */
 async function limparAntigos() {
@@ -110,4 +138,4 @@ async function contarNotificadosHoje(tipo) {
   }
 }
 
-module.exports = { tentarMarcarNotificado, jaNotificado, marcarNotificado, limparAntigos, contarNotificadosHoje };
+module.exports = { tentarMarcarNotificado, jaNotificado, marcarNotificado, registrarRealizacao, limparAntigos, contarNotificadosHoje };

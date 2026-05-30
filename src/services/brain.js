@@ -7,7 +7,7 @@ const { getFaseLunar, getContextoAstrologico } = require('../integrations/astrol
 const { getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holistic-context');
 const { processarCalendar, sinalCalendarGuard } = require('./calendarBrain');
-const { montarDiretrizCelebracao } = require('./celebracaoPosEvento');
+const { montarDiretrizCelebracao, classificarRealizacao } = require('./celebracaoPosEvento');
 const { getBrtNow, montarBlocoAgenda } = require('../utils/time');
 const { buscarEventosTodos } = require('../integrations/calendar');
 
@@ -449,6 +449,19 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
           await addMessage('assistant', ariaResp);
           await limparAcaoPendente(chatId);
           console.log(`🎉 [Brain] Celebração pós-evento: "${pendPos.params?.evento}" (${pendPos.params?.sabor})`);
+          // Commit 2 (Fogg): persiste o realizado na linha de dedup (registro
+          // INTERNO — nunca vira cobrança; a celebração já foi enviada acima).
+          // Best-effort: nunca derruba o turno nem a fala.
+          try {
+            const { registrarRealizacao } = require('./eventosNotificados');
+            const tipoNotif = pendPos.params?.sabor === 'habito' ? 'pos_evento_habito' : 'pos_evento_vivido';
+            await registrarRealizacao(pendPos.params?.evento_id, tipoNotif, {
+              realizado: classificarRealizacao(message),
+              contextoResposta: message,
+            });
+          } catch (e) {
+            console.error('[Brain] registrarRealizacao pós-evento falhou (best-effort):', e.message);
+          }
           return ariaResp;
         }
       }
