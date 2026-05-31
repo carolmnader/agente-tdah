@@ -6,7 +6,7 @@ const { isEmergencia, getModoEmergencia, gerarCheckin, getCheckinMatinal, interp
 const { getFaseLunar, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
 const { buildHolisticContext, buildBloqueioContext } = require('../prompts/holistic-context');
-const { processarCalendar, sinalCalendarGuard } = require('./calendarBrain');
+const { processarCalendar, sinalCalendarGuard, RE_FATO_PASSADO, RE_VERBO_IMPERATIVO_CALENDAR } = require('./calendarBrain');
 const { montarDiretrizCelebracao, classificarRealizacao } = require('./celebracaoPosEvento');
 const { getBrtNow, montarBlocoAgenda } = require('../utils/time');
 const { buscarEventosTodos } = require('../integrations/calendar');
@@ -630,7 +630,15 @@ Fora comandos, é só conversar normal. Eu leio contexto, agenda, humor.`;
     const memorySummary = await getMemorySummary();
 
     // Passo 4: gera resposta
-    const ariaResponse = await generateResponse(message, analysis, strategy, memorySummary, pessoasInfo);
+    // #19 (Commit B): se a Carol relata que NÃO fez algo (negativa SEM verbo
+    // imperativo de Calendar), injeta diretriz determinística pra ARIA não
+    // inverter a negação ("não fiz" → "que bom que você fez"). Mesmo predicado do
+    // bypass de fato-passado (calendarBrain L534). Custo zero quando não é negativa.
+    const ehRelatoNegativo = RE_FATO_PASSADO.test(message) && !RE_VERBO_IMPERATIVO_CALENDAR.test(message);
+    const diretrizNegativa = ehRelatoNegativo
+      ? 'A Carol está relatando que NÃO fez/não foi a uma atividade. Reflita isso com PRECISÃO — NUNCA responda como se ela tivesse feito (não inverta a negação). Acolha sem culpa, sem cobrança, sem perguntar "por quê", sem emendar pergunta ou próxima ação. Sempre "você". 1 a 2 frases.'
+      : '';
+    const ariaResponse = await generateResponse(message, analysis, strategy, memorySummary, pessoasInfo, diretrizNegativa);
 
     // Passo 5: salva na memória (Supabase + local)
     await addMessage('user', message);
