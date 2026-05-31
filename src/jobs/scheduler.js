@@ -2,7 +2,7 @@
 // usa 'America/Sao_Paulo' (pós-Bug #5). Alinhar todos pra Sao_Paulo em sessão futura.
 const cron = require('node-cron');
 const { listarEventosHoje, listarEventosSemana, proximoHorarioLivre, getAuthClient, buscarEventosTodos, getCalendarioInfo } = require('../integrations/calendar');
-const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria, buscarHumorRecente, salvarMemoriaComHistorico } = require('../services/memorySupabase');
+const { buscarMemorias, buscarHistoricoRecente, listarTarefas, salvarMemoria, buscarHumorRecente, salvarMemoriaComHistorico, salvarMensagem } = require('../services/memorySupabase');
 const { planejarUpsertFeedback } = require('../services/feedbackReincidente');
 const { getFaseLunarLocal, getContextoAstrologico } = require('../integrations/astrology');
 const { getContextoAyurveda, getContextoAyurvedico, getMensagemAyurvedica } = require('../modules/ayurveda');
@@ -159,17 +159,40 @@ const jobBriefingMatinal = async () => {
 
 // ─── JOB 1.5: CHECK-IN TARDE — 12h, 15h, 18h ────────────────────────────────
 
+// #29: PURO — remove candidatos cujo id já está no set de notificados (dedup por evento).
+function filtrarEventosNaoNotificados(eventos, jaNotificadosSet) {
+  const set = jaNotificadosSet instanceof Set ? jaNotificadosSet : new Set(jaNotificadosSet || []);
+  return (Array.isArray(eventos) ? eventos : []).filter(e => e && !set.has(e.id));
+}
+
 const jobCheckinTarde = async (hora) => {
   try {
     const agora = new Date();
     const inicioDia = new Date(agora); inicioDia.setHours(0,0,0,0);
     const eventos = await buscarEventosTodos(inicioDia, agora);
-    const eventosPassados = eventos
+    // #29: candidatos = eventos timed do dia, COM id (pra dedup + mark).
+    const candidatos = eventos
       .filter(e => e.start?.dateTime)
       .map(e => ({
+        id: e.id,
         titulo: e.summary,
         hora: new Date(e.start.dateTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
       }));
+    // #29 dedup POR EVENTO — tipo próprio 'checkin_tarde' (separado do motor pos_evento).
+    // Não re-perguntar o mesmo evento já perguntado (ex.: treino 7h às 12h E às 15h).
+    const jaSet = new Set();
+    for (const c of candidatos) {
+      if (await jaNotificado(c.id, 'checkin_tarde')) jaSet.add(c.id);
+    }
+    const eventosParaPerguntar = filtrarEventosNaoNotificados(candidatos, jaSet);
+    // Conservador: só corta quando o dedup ESVAZIOU uma lista que tinha eventos
+    // (evita re-perguntar — #29). Dia sem evento timed (candidatos=0) segue normal:
+    // preserva o check-in de momento/tarefa/humor (prompt scheduler.js:49).
+    if (candidatos.length > 0 && eventosParaPerguntar.length === 0) {
+      console.log(`[Scheduler] Check-in tarde ${hora}h: eventos do dia já perguntados — não re-envia.`);
+      return;
+    }
+    const eventosPassados = eventosParaPerguntar.map(c => ({ titulo: c.titulo, hora: c.hora }));
 
     const em30min = new Date(agora.getTime() + 30 * 60000);
     const proximos = await buscarEventosTodos(agora, em30min);
@@ -195,6 +218,14 @@ const jobCheckinTarde = async (hora) => {
       }
     });
     await enviarMensagemLonga(CAROL_CHAT_ID, msg);
+    // #29 mark-after-send: marca cada evento incluído (só roda se o envio acima não lançou).
+    for (const c of eventosParaPerguntar) {
+      try { await marcarNotificado(c.id, 'checkin_tarde'); }
+      catch (e) { console.error(`[Scheduler] checkin-tarde marcarNotificado falhou (${c.id}):`, e.message); }
+    }
+    // #30 loga o send proativo em mensagens (hoje some do histórico). Best-effort.
+    try { await salvarMensagem('assistant', msg); }
+    catch (e) { console.error('[Scheduler] checkin-tarde log mensagem falhou:', e.message); }
     await salvarMemoria('sistema', `ultimo_checkin_${hora}h`, agora.toISOString(), `cron checkin tarde ${hora}h`);
     console.log(`[Scheduler] ✅ Check-in tarde ${hora}h enviado`);
   } catch(e) {
@@ -651,6 +682,7 @@ const iniciarScheduler = () => {
 
 module.exports = {
   iniciarScheduler,
+  filtrarEventosNaoNotificados,
   jobBriefingMatinal,
   jobCheckinTarde,
   jobPreEvento,
