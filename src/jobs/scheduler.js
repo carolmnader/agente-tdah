@@ -14,6 +14,7 @@ const { proporSugestao } = require('../services/sugestoes');
 const { jaNotificado, marcarNotificado, limparAntigos, contarNotificadosHoje } = require('../services/eventosNotificados');
 const { snapshotMatinal } = require('../services/oura');
 const { montarDiretrizPriming } = require('../services/priming');
+const { selecionarCitacaoDoDia, marcarCitacaoUsada, montarBlocoCitacao } = require('../services/citacoes');
 const { getBrtNow, eventoElegivelPos, classificarSaborPos, cabeNoTetoPos } = require('../utils/time');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT, normalizarTratamento } = require('../prompts/system');
@@ -44,28 +45,7 @@ FONTES (CRÍTICO — não inventar):
 - CONTEXTUAIS (pano de fundo, NÃO são agenda): memorias_relevantes, hipoteses_ativas. Use como observação ou cor, nunca como compromisso de hoje.
 - aprendizados_recentes: hipóteses recém-validadas sobre a Carol. Se o array tiver itens, INCLUA no briefing UM bloco destacado com marcador 🧠, no formato exato: "🧠 Algo que aprendi com certeza sobre você: [texto da hipótese de maior confiança]". Use só o primeiro item do array. Máximo 1 bloco por briefing. Se o array estiver vazio, não mencione nada.
 - Tipo "briefing_matinal": é abertura de dia (7h BRT em geral). Tom Registro C (editorial-observadora) ou A (seca-poética). NUNCA motivacional ("você é capaz!", "acredite em si!", "vai dar certo!", "bom dia maravilhosa!"). NUNCA self-help genérico ou clichês TDAH ("uma coisa de cada vez", "ferrari com freio de bicicleta").
-  PROVOCAÇÃO CULTURAL (opcional — no máximo UMA linha, só se conectar de verdade com o dia/estação/tema; se não conectar, OMITE):
-
-  Puxe de UMA figura desta curadoria e PARAFRASEIE uma ideia documentada dela, atribuindo o autor ("como X pensava…", "na visão de X…"). Tom de registro, não de motivação — provocação que faz pensar, nunca frase de efeito de coach.
-
-  REGRA ANTI-MENTIRA (inegociável): NUNCA invente frase entre aspas na boca de ninguém. Parafraseie a IDEIA e atribua o autor. Com figuras públicas reais (Mujica, Krenak, Arendt…) isso vale dobrado — frase falsa é mentira e desrespeito. A ÚNICA citação verbatim permitida é a canônica do Niemeyer ("Não é o ângulo reto que me atrai, nem a linha reta, dura, inflexível…"). Qualquer outra coisa: paráfrase atribuída.
-
-  NÃO use pop-filosofia de palco (ex.: Cortella) como sabedoria. A curadoria é séria.
-
-  Curadoria (paleta — varie, não repita sempre os mesmos):
-  - Arquitetura/espaço: Bachelard, Pallasmaa, Tanizaki, Lina Bo Bardi, Niemeyer, Louis Kahn, Aldo Van Eyck, Manfredo Tafuri, Henri Lefebvre
-  - Literatura: Clarice Lispector, Hilda Hilst, Hermann Hesse, Cortázar, Camus, João Cabral, Dante, Stefan Zweig, Saint-Exupéry, Calvino, Borges, Drummond, Bauman
-  - Cinema: Francis Ford Coppola, Sofia Coppola, Woody Allen, Agnès Varda, Joachim Trier, Godard, Scorsese, Cronenberg, Tarkóvski, Chris Marker, Kieślowski, Glauber Rocha, Wong Kar-wai
-  - Música: Bach, Chopin, Prokófiev, Chostakóvitch, Pierre Henry, Stockhausen, Chico Science, Nino Rota
-  - Pintura: Chagall
-  - História/pensamento: Hannah Arendt, Carlos Lemos, Roberto Pompeu de Toledo, Eduardo Giannetti, Hobsbawm, Braudel, Carlo Ginzburg, Eduardo Galeano
-  - Política como filosofia de vida: Ailton Krenak, Davi Kopenawa, Eduardo Viveiros de Castro, Pepe Mujica, Václav Havel
-  - Grandes mentes: Nietzsche, Schopenhauer, Edith Stein, Jung, Simone Weil, Byung-Chul Han, Susan Sontag
-  Exemplos de tom (referência, não copiar):
-  ✓ "Quatro reuniões. Bachelard chamava a casa de abrigo do devaneio — você vai ter pouco devaneio hoje. Marca um intervalo."
-  ✓ "Lua nova, Vata pesado. Tanizaki escrevia sobre o valor das sombras — hoje permite a manhã ser menos brilhante."
-  ✗ "Boa segunda! Como diria Clarice, 'eu sou tudo aquilo que aconteceu comigo'!" (frase textual inventada, motivacional)
-  ✗ "Você é capaz! Niemeyer dizia pra acreditar nas curvas!" (clichê motivacional)
+${contexto.tipo === 'briefing_matinal' ? montarBlocoCitacao(contexto.dados?.citacao_do_dia) : ''}
 - Tipo "checkin_tarde": é check-in de meio do dia, hora específica no contexto. Tom Registro A (seca-poética) ou C (editorial-observadora), NUNCA maternal. Se há eventos_passados, pergunte factualmente sobre eles ("você tinha X, como foi?"). Se tarefas_pendentes tem itens, mencione uma específica sem cobrar. Se evento_proximo_30min não for null, seja breve (vai interromper). Se tudo vazio, só marque o momento ("tarde começando") sem forçar conversa.
 - Tipo "pre_evento": é lembrete de evento que começa em alguns minutos. Em "CONTEXTO" você recebe: evento (nome), hora (HH:MM BRT), em_minutos (número EXATO de minutos até começar), local. SEMPRE use em_minutos LITERALMENTE — ex: se em_minutos=28, escreva "em 28 minutos" ou "daqui a 28 minutos". NÃO arredonde pra 30. NÃO substitua por "logo", "em breve", "já já", "daqui a pouco". Se em_minutos for 0 ou 1, diga "Agora" ou "em 1 minuto". Use a hora literal (HH:MM). Tom Registro A (seca-poética) ou C (editorial-observadora). Mensagem CURTA — 1-3 linhas (com o priming abaixo, no máximo ~4). Pode adicionar 1 detalhe contextual (item a trazer, deslocamento). Se local for "não especificado", omita.
 ${contexto.tipo === 'pre_evento' ? montarDiretrizPriming(contexto.dados?.oura_corpo) : ''}
@@ -131,6 +111,13 @@ const jobBriefingMatinal = async () => {
 
     const ayurvedaMsg = getMensagemAyurvedica(agora);
 
+    // Citação do dia (no-repeat). null → montarBlocoCitacao usa o fallback antigo.
+    // usada_em é marcada SÓ após o envio bem-sucedido (mark-after-send), abaixo.
+    const citacaoDoDia = await selecionarCitacaoDoDia().catch(e => {
+      console.log('🟡 [Briefing] selecionarCitacaoDoDia falhou:', e.message);
+      return null;
+    });
+
     const msg = await gerarMensagemProativa({
       tipo: 'briefing_matinal',
       dados: {
@@ -150,11 +137,15 @@ const jobBriefingMatinal = async () => {
         hipoteses_ativas: hipoteses,
         aprendizados_recentes: aprendizadosRecentes,
         oura_corpo: ouraCorpo,
-        sugestao: agendaPesada ? 'Sugerir deixar agenda mais leve' : 'Encorajar o dia'
+        sugestao: agendaPesada ? 'Sugerir deixar agenda mais leve' : 'Encorajar o dia',
+        citacao_do_dia: citacaoDoDia
       }
     });
 
     await enviarMensagemLonga(CAROL_CHAT_ID, msg);
+    // mark-after-send: só marca usada_em depois do envio sem erro (a linha acima
+    // lança em falha → cai no catch e NÃO marca, preservando a citação pro próximo dia).
+    if (citacaoDoDia) await marcarCitacaoUsada(citacaoDoDia.id);
     if (aprendizadosRecentes.length > 0 && msg.includes('🧠')) {
       await marcarComoNotificadas(aprendizadosRecentes.map(h => h.id));
       console.log(`[Scheduler] 🧠 ${aprendizadosRecentes.length} aprendizado(s) marcado(s)`);
