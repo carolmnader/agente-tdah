@@ -104,7 +104,16 @@ function temSinalCalendar(msg) {
 // ("Não fui ao mercado. Agenda pra amanhã" → tem verbo imperativo → segue).
 // Bug K: lookahead `(?=$|\W)` em vez de `\b` final pra funcionar com chars
 // acentuados (ex: "saí" + espaço — `\b` falha entre `í` non-word e espaço non-word).
-const RE_FATO_PASSADO = /^\s*(n[aã]o\s+(fui|fiz|consegui|deu|cheguei|tive|rolou|aconteceu|sa[íi]|acordei)|cheguei\s+tarde|esqueci|perdi|faltei|pulei|passei\s+o\s+dia\s+sem|deixei\s+pra\s+l[aá]|acabei\s+n[aã]o|falhei|escapei|travei)(?=$|\W)/i;
+// #20 (fix): ampliado de ^\s*não... (ancorado, lista curta) para ANYWHERE +
+// lista de verbos bem mais ampla. Cobre as 3 classes que vazavam pro Calendar:
+//  (a) verbo fora da lista antiga: "não treinei/malhei/estudei/li/corri..."
+//  (b) prefixo antes do "não": "hoje não fui", "ah não fiz", "acho que não estudei"
+//  (c) ordem atividade-primeiro: "yoga não rolou", "academia não fui"
+// SEGURO: o gate `&& !RE_VERBO_IMPERATIVO_CALENDAR` (L534/542) preserva comando —
+// "não rolou ontem, cancela o de amanhã" tem "cancela" → NÃO bypassa. Superset do
+// regex antigo (todos os tokens originais mantidos). Bypass = só conversa (return null).
+// `(?=$|\W)` em vez de \b final (lição Bug K: \b falha após char acentuado, ex "saí").
+const RE_FATO_PASSADO = /\bn[aã]o\s+(fui|fiz|fez|fomos|estive|vim|pude|consegui|deu|cheguei|tive|rolou|aconteceu|sa[íi]|acordei|treinei|malhei|pratiquei|estudei|li|corri|terminei|completei|comecei|toquei|escrevi|desenhei|pintei|trabalhei|dormi|descansei|meditei|caminhei|andei|nadei|joguei|cozinhei|limpei|arrumei|organizei|lavei|voltei|almocei|jantei|tomei)(?=$|\W)|\b(esqueci|perdi|faltei|pulei|falhei|escapei|travei)(?=$|\W)|cheguei\s+tarde|passei\s+o\s+dia\s+sem|deixei\s+pra\s+l[aá]|acabei\s+n[aã]o/i;
 const RE_VERBO_IMPERATIVO_CALENDAR = /\b(cancela|cancelar|desmarca|desmarcar|tira|tirar|remove|adiciona|adicionar|marca|marcar|agenda|agendar|reagenda|reagendar|muda|mudar|move|mover|coloca|p[oõ]e|bota)\b/i;
 
 // Sabor A: relato de atividade JÁ FEITA (passado POSITIVO) não é intent de
