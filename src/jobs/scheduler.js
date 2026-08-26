@@ -10,6 +10,7 @@ const { gerarRelatorioSemanal, gerarRelatorioMensal } = require('../services/ana
 const { aplicarDecaimentoGlobal, proporHipotese, hipotesesParaPrompt, buscarAprendizadosNaoNotificados, marcarComoNotificadas } = require('../services/hipoteses');
 const { analisarNoturno, buscarHumor3dias } = require('../services/analiseNoturna');
 const { proporSugestao } = require('../services/sugestoes');
+const { tentarMarcarNotificado, limparAntigos } = require('../services/eventosNotificados');
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT } = require('../prompts/system');
 
@@ -189,6 +190,13 @@ const jobPreEvento = async () => {
         );
 
         for (const evento of eventos) {
+          // Guarda anti-spam Bug #22: só notifica se for 1a vez pra este evento
+          const deveNotificar = await tentarMarcarNotificado(evento.id, 'pre_evento_30min');
+          if (!deveNotificar) {
+            console.log(`⏭️  Evento ${evento.id} já notificado, pulando.`);
+            continue;
+          }
+
           const hora = new Date(evento.start.dateTime).toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
           const msg = await gerarMensagemProativa({
             tipo: 'pre_evento',
@@ -328,6 +336,8 @@ const jobRelatorioMensal = async () => {
 const jobAnaliseNoturna = async () => {
   console.log('🌙 [Cron noturno] Iniciando análise...');
   try {
+    const limpos = await limparAntigos();
+    console.log(`🧹 Eventos notificados antigos (>48h) removidos: ${limpos}`);
     const decaimento = await aplicarDecaimentoGlobal();
     console.log(`🌙 Decaimento aplicado em ${decaimento} hipóteses`);
     const resultado = await analisarNoturno();
