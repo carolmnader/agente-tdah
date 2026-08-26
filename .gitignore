@@ -4,3 +4,4 @@ node_modules/
 *.txt
 src/client_secret*.json
 src/client_secret*.json
+.claude/worktrees/
